@@ -1,12 +1,19 @@
+---
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
 # GCCEII - GCC Economic Integration Index
 
 ## Overview
 
-R package for calculating the GCC Economic Integration Index using the COINr framework for composite indicator construction.
+R package for calculating the GCC Economic Integration Index using the
+COINr framework for composite indicator construction.
 
 ## Package Structure
 
-```
+```         
 gcceii/
 ├── R/                              # Package functions
 │   ├── 01_data_loading.R          # ✅ Data extraction → tidy datasets
@@ -30,39 +37,42 @@ gcceii/
 └── README.md                       # ✅ This file
 ```
 
-Legend: ✅ Complete | 🔲 To be created
+Legend: ✅ Complete \| 🔲 To be created
 
----
+------------------------------------------------------------------------
 
 ## COINr Migration Plan
 
 ### Stage 1: Foundation (Data + Helpers + Raw Indicators)
 
-**Goal**: Create a clean data pipeline that outputs **raw indicator values** (unnormalized)
+**Goal**: Create a clean data pipeline that outputs **raw indicator
+values** (unnormalized)
 
-**Files**:
-- `01_data_loading.R` ✅ - Load all source data, standardize country names
-- `02_helpers.R` ✅ - Pure utility functions (CV, GDP extraction, etc.)
-- `03_indicators_trade.R` - Extract raw trade values from Comtrade
-- `04_indicators_financial.R` - Extract raw financial/monetary values
-- `05_indicators_labor.R` - Extract raw labor/mobility values
-- `06_indicators_infrastructure.R` - Extract raw infrastructure values
-- `07_indicators_sustainability.R` - Extract raw sustainability values
+**Files**: - `01_data_loading.R` ✅ - Load all source data, standardize
+country names - `02_helpers.R` ✅ - Pure utility functions (CV, GDP
+extraction, etc.) - `03_indicators_trade.R` - Extract raw trade values
+from Comtrade - `04_indicators_financial.R` - Extract raw
+financial/monetary values - `05_indicators_labor.R` - Extract raw
+labor/mobility values - `06_indicators_infrastructure.R` - Extract raw
+infrastructure values - `07_indicators_sustainability.R` - Extract raw
+sustainability values
 
-**Key Change**: Indicator functions return **raw values** (e.g., `inflation_rate = 2.3%`), NOT normalized scores. COINr will handle normalization.
+**Key Change**: Indicator functions return **raw values** (e.g.,
+`inflation_rate = 2.3%`), NOT normalized scores. COINr will handle
+normalization.
 
----
+------------------------------------------------------------------------
 
 ### Stage 2: COINr Integration (Metadata + Coin Construction)
 
 **Goal**: Build the coin object with proper metadata
 
-**Files**:
-- `08_coinr_metadata.R` - Build iMeta from Excel framework
-- `09_coinr_build.R` - Coin construction and processing
+**Files**: - `08_coinr_metadata.R` - Build iMeta from Excel framework -
+`09_coinr_build.R` - Coin construction and processing
 
 **Deliverables**:
-```r
+
+``` r
 # iMeta structure (90 indicators + aggregates)
 iMeta <- tibble(
   iCode = c("ind_51", "ind_52", ..., "Trade", "Financial", ..., "Index"),
@@ -80,68 +90,68 @@ coin <- Normalise(coin, dset = "Raw", global_specs = list(f_n = "n_minmax"))
 coin <- Aggregate(coin, dset = "Normalised", f_ag = "a_amean")
 ```
 
----
+------------------------------------------------------------------------
 
 ### Stage 3: Dashboard + Export (Outputs)
 
 **Goal**: Generate all outputs from the coin object
 
-**Files**:
-- Analysis scripts for sensitivity analysis
-- Export functions for Excel/CSV
-- Dashboard using coin object
+**Files**: - Analysis scripts for sensitivity analysis - Export
+functions for Excel/CSV - Dashboard using coin object
 
----
+------------------------------------------------------------------------
 
 ## Indicator Framework
 
 ### Dimensions and Weights
 
 | Dimension | Weight | Key Indicators |
-|-----------|--------|----------------|
+|----|----|----|
 | Trade Integration | 20% | Trade intensity, non-oil trade, services, BEC composition |
 | Financial Integration | 20% | OCA readiness, banking, stock markets, FDI |
-| Labor & Mobility | 15% | Labor mobility, students, tourism |
+| Labor & Mobility | 20% | Labor mobility, students, tourism |
 | Infrastructure | 20% | Aviation, energy, digital |
 | Sustainability | 10% | Non-oil share, manufacturing, diversification |
-| Convergence | 15% | Cross-dimension CV indicators |
+| Convergence | 10% | Cross-dimension CV indicators |
 
 ### Special Handling: Convergence Indicators
 
-Convergence indicators use **Coefficient of Variation (CV)** across countries:
-- Same score for all countries in a given year
-- Lower CV = higher convergence = higher score
-- Formula: `convergence_score = 100 - CV`
+Convergence indicators use **Coefficient of Variation (CV)** across
+countries: - Same score for all countries in a given year - Lower CV =
+higher convergence = higher score - Formula:
+`convergence_score = 100 - CV`
 
 These will be handled via custom aggregation in COINr.
 
----
+------------------------------------------------------------------------
 
 ## Data Sources
 
 ### GCC-Stat Internal (CSV → future SDMX)
-- `DF_Common_Market_Tables.csv` - Common Market indicators
-- `DF_ES_NA.csv` - National Accounts
-- `DF_GEETS_TUR.csv` - Tourism
-- `DF_ES_CPI.csv` - CPI/Inflation
-- `DF_PSS_LAB.csv` - Labor Force
-- `DF_ES_MF.csv` - Monetary & Financial
-- `DF_GEETS_ENR.csv` - Energy
-- `DF_PSS_DEM_POP.csv` - Population
+
+-   `DF_Common_Market_Tables.csv` - Common Market indicators
+-   `DF_ES_NA.csv` - National Accounts
+-   `DF_GEETS_TUR.csv` - Tourism
+-   `DF_ES_CPI.csv` - CPI/Inflation
+-   `DF_PSS_LAB.csv` - Labor Force
+-   `DF_ES_MF.csv` - Monetary & Financial
+-   `DF_GEETS_ENR.csv` - Energy
+-   `DF_PSS_DEM_POP.csv` - Population
 
 ### External
-- `comtrade_data.rds` - UN Comtrade aggregate trade
-- `comtrade_data_hs.rds` - UN Comtrade HS-level trade
-- `GCC FDI flows.csv` - FDI data
-- `ICP_data.csv` - World Bank ICP
 
----
+-   `comtrade_data.rds` - UN Comtrade aggregate trade
+-   `comtrade_data_hs.rds` - UN Comtrade HS-level trade
+-   `GCC FDI flows.csv` - FDI data
+-   `ICP_data.csv` - World Bank ICP
+
+------------------------------------------------------------------------
 
 ## Usage
 
 ### Current (Development)
 
-```r
+``` r
 # Source the modules
 source("R/01_data_loading.R")
 source("R/02_helpers.R")
@@ -155,7 +165,7 @@ raw_2023 <- extract_raw_indicators(data_list, year_filter = 2023)
 
 ### Future (Package)
 
-```r
+``` r
 library(gcceii)
 library(COINr)
 
@@ -169,14 +179,14 @@ results <- get_results(coin_2023, dset = "Aggregated")
 sa_results <- SA_estimate(coin_2023)
 ```
 
----
+------------------------------------------------------------------------
 
 ## Development Notes
 
 ### Key Functions Migrated
 
 | Original Function | New Location | Change |
-|-------------------|--------------|--------|
+|----|----|----|
 | `load_gcc_data()` | `01_data_loading.R` | Added ISO3 codes, SDMX placeholders |
 | `standardize_countries()` | `01_data_loading.R` | Added ISO3 codes |
 | `get_gdp()` | `01_data_loading.R` | Enhanced validation |
@@ -186,37 +196,39 @@ sa_results <- SA_estimate(coin_2023)
 
 ### COINr Functions to Use
 
-| COINr Function | Purpose |
-|----------------|---------|
-| `new_coin()` | Create coin object |
-| `Normalise()` | Min-max, rank, z-score normalization |
-| `Aggregate()` | Weighted averages, geometric means |
-| `get_data()` | Extract processed data |
-| `get_results()` | Get aggregated scores |
-| `SA_estimate()` | Sensitivity analysis |
-| `plot_corr()` | Correlation matrices |
-| `plot_bar()` | Country comparison charts |
-| `export_to_excel()` | Professional Excel export |
+| COINr Function      | Purpose                              |
+|---------------------|--------------------------------------|
+| `new_coin()`        | Create coin object                   |
+| `Normalise()`       | Min-max, rank, z-score normalization |
+| `Aggregate()`       | Weighted averages, geometric means   |
+| `get_data()`        | Extract processed data               |
+| `get_results()`     | Get aggregated scores                |
+| `SA_estimate()`     | Sensitivity analysis                 |
+| `plot_corr()`       | Correlation matrices                 |
+| `plot_bar()`        | Country comparison charts            |
+| `export_to_excel()` | Professional Excel export            |
 
----
+------------------------------------------------------------------------
 
 ## Claude Code Benefits
 
 Using GitHub + Claude Code for this project enables:
 
-1. **Bulk refactoring** - Transform 25+ indicator functions to return raw values
-2. **Terminal-based testing** - Run R scripts and debug interactively
-3. **Package structure** - Generate DESCRIPTION, NAMESPACE, roxygen2 docs
-4. **CI/CD setup** - GitHub Actions for automated testing
-5. **Version control** - Track methodology changes across development
+1.  **Bulk refactoring** - Transform 25+ indicator functions to return
+    raw values
+2.  **Terminal-based testing** - Run R scripts and debug interactively
+3.  **Package structure** - Generate DESCRIPTION, NAMESPACE, roxygen2
+    docs
+4.  **CI/CD setup** - GitHub Actions for automated testing
+5.  **Version control** - Track methodology changes across development
 
----
+------------------------------------------------------------------------
 
 ## Contact
 
 Economic Statistics Department, GCC-Stat
 
----
+------------------------------------------------------------------------
 
 ## License
 

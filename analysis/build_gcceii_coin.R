@@ -257,19 +257,19 @@ message("=======================================================")
 # =============================================================================
 
 # Uncomment to run sensitivity analysis (takes a few minutes)
-#
-# message("\nRunning sensitivity analysis...")
-# 
-# sa_results <- get_sensitivity(
-#   gcceii_coin,
-#   SA_specs = list(
-#     SA_type = "UA",
-#     N = 100,
-#     SA_factors = list(
-#       Normalisation = c("n_minmax", "n_rank", "n_zscore"),
-#       Aggregation = c("a_amean", "a_gmean")
-#     )
-#   )
-# )
-#
-# message("✓ Sensitivity analysis complete")
+
+message("\nRunning sensitivity analysis...")
+ 
+sa_results <- get_sensitivity(
+  gcceii_coin,
+  SA_specs = list(
+    SA_type = "UA",
+    N = 100,
+    SA_factors = list(
+      Normalisation = c("n_minmax", "n_rank", "n_zscore"),
+      Aggregation = c("a_amean", "a_gmean")
+    )
+  )
+)
+
+message("✓ Sensitivity analysis complete")
