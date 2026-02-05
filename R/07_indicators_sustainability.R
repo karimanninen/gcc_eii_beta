@@ -85,37 +85,10 @@ extract_sustainability_raw <- function(data_list, year_filter) {
   return(sustainability)
 }
 
-#' Extract Raw Convergence Base Indicators
-#'
-#' Extracts the base values used to calculate convergence scores.
-#' These are NOT the final convergence scores - those are calculated
-#' as (100 - CV) in COINr using custom aggregation.
-#'
-#' @param data_list List of GCC-Stat datasets (from load_gcc_data())
-#' @param year_filter Year to extract
-#' @return Tibble with uName and raw indicator columns
-#' @export
-extract_convergence_raw <- function(data_list, year_filter) {
-  
-  gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
-  
-  message(paste("    Extracting convergence base indicators for", year_filter))
-  
-  icp_data <- data_list$icp
-  
-  # PPP GDP per capita
-  ppp_gdp_pc <- calc_ppp_gdp_pc_raw(icp_data, year_filter)
-  
-  # Price level index
-  price_level <- calc_price_level_raw(icp_data, year_filter)
-  
-  # Combine
-  convergence_raw <- tibble(uName = gcc_countries) %>%
-    left_join(ppp_gdp_pc, by = "uName") %>%
-    left_join(price_level, by = "uName")
-  
-  return(convergence_raw)
-}
+# NOTE: extract_convergence_raw() is defined in 08_indicators_convergence.R
+# This file provides helper functions used by that module:
+#   - calc_ppp_gdp_pc_raw()
+#   - calc_price_level_raw()
 
 # =============================================================================
 # INDIVIDUAL INDICATOR FUNCTIONS
@@ -273,25 +246,24 @@ calculate_all_convergence_scores <- function(raw_data) {
 
 message("
 =======================================================
-  SUSTAINABILITY & CONVERGENCE INDICATORS MODULE LOADED
+  SUSTAINABILITY INDICATORS MODULE LOADED
 =======================================================
 
-Main functions:
+Main function:
   - extract_sustainability_raw() : Extract sustainability indicators
-  - extract_convergence_raw()    : Extract convergence base indicators
 
 Sustainability indicators:
   - ind_non_oil_share: Non-oil GDP share (%)
   - ind_oil_share: Oil GDP share (%)
   - ind_manufacturing_share: Manufacturing share (%)
 
-Convergence base indicators:
-  - ind_ppp_gdp_pc: PPP GDP per capita (USD)
-  - ind_price_level: Price level index (World=100)
-
-Helper functions:
+Helper functions (used by 08_indicators_convergence.R):
+  - calc_ppp_gdp_pc_raw()             : PPP GDP per capita
+  - calc_price_level_raw()            : Price level index
   - calculate_convergence_score()     : CV to score conversion
   - calculate_all_convergence_scores(): All convergence scores
+
+NOTE: extract_convergence_raw() is in 08_indicators_convergence.R
 
 =======================================================
 ")
