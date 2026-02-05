@@ -13,49 +13,53 @@ COINr framework for composite indicator construction.
 
 ## Package Structure
 
-```         
-gcceii/
+```
+gcc_eii_beta/
 ├── R/                              # Package functions
 │   ├── 01_data_loading.R          # ✅ Data extraction → tidy datasets
 │   ├── 02_helpers.R               # ✅ Pure utility functions
-│   ├── 03_indicators_trade.R      # 🔲 Trade indicator calculations
-│   ├── 04_indicators_financial.R  # 🔲 Financial indicator calculations
-│   ├── 05_indicators_labor.R      # 🔲 Labor indicator calculations
-│   ├── 06_indicators_infrastructure.R # 🔲 Infrastructure indicator calculations
-│   ├── 07_indicators_sustainability.R # 🔲 Sustainability indicator calculations
-│   ├── 08_coinr_metadata.R        # 🔲 iMeta builder for COINr
-│   └── 09_coinr_build.R           # 🔲 Coin construction and processing
+│   ├── 03_indicators_trade.R      # ✅ Trade indicator calculations
+│   ├── 04_indicators_financial.R  # ✅ Financial indicator calculations
+│   ├── 05_indicators_labor.R      # ✅ Labor indicator calculations
+│   ├── 06_indicators_infrastructure.R # ⚠️ Infrastructure (4 placeholders)
+│   ├── 07_indicators_sustainability.R # ✅ Sustainability indicator calculations
+│   ├── 08_indicators_convergence.R    # ✅ Convergence indicator calculations
+│   ├── 09_coinr_metadata.R        # ✅ iMeta builder for COINr
+│   └── 10_normalization_config.R  # ✅ Normalization pipeline
 ├── analysis/                       # Analysis scripts (not part of package)
-│   └── build_gcceii_coin.R        # 🔲 Main COINr workflow
+│   └── build_gcceii_coin.R        # ✅ Main COINr workflow (working)
 ├── inst/
 │   └── shiny/
 │       └── app.R                  # Dashboard (future)
-├── data-raw/                       # Scripts that generate package data
-├── data/                           # Processed .rda files
+├── data-raw/                       # Source data files (CSV)
+├── output/                         # Generated results
 ├── DESCRIPTION                     # 🔲 Package metadata
 ├── NAMESPACE                       # 🔲 Exports
 └── README.md                       # ✅ This file
 ```
 
-Legend: ✅ Complete \| 🔲 To be created
+Legend: ✅ Complete | ⚠️ Partial | 🔲 To be created
+
+**Status:** 94.7% complete (90/95 functions implemented)
 
 ------------------------------------------------------------------------
 
 ## COINr Migration Plan
 
-### Stage 1: Foundation (Data + Helpers + Raw Indicators)
+### Stage 1: Foundation (Data + Helpers + Raw Indicators) ✅ COMPLETE
 
 **Goal**: Create a clean data pipeline that outputs **raw indicator
 values** (unnormalized)
 
-**Files**: - `01_data_loading.R` ✅ - Load all source data, standardize
-country names - `02_helpers.R` ✅ - Pure utility functions (CV, GDP
-extraction, etc.) - `03_indicators_trade.R` - Extract raw trade values
-from Comtrade - `04_indicators_financial.R` - Extract raw
-financial/monetary values - `05_indicators_labor.R` - Extract raw
-labor/mobility values - `06_indicators_infrastructure.R` - Extract raw
-infrastructure values - `07_indicators_sustainability.R` - Extract raw
-sustainability values
+**Files**:
+- `01_data_loading.R` ✅ - Load all source data, standardize country names
+- `02_helpers.R` ✅ - Pure utility functions (CV, GDP extraction, etc.)
+- `03_indicators_trade.R` ✅ - Extract raw trade values from Comtrade
+- `04_indicators_financial.R` ✅ - Extract raw financial/monetary values
+- `05_indicators_labor.R` ✅ - Extract raw labor/mobility values
+- `06_indicators_infrastructure.R` ⚠️ - 4 placeholder functions need external data
+- `07_indicators_sustainability.R` ✅ - Extract raw sustainability values
+- `08_indicators_convergence.R` ✅ - Extract raw convergence values
 
 **Key Change**: Indicator functions return **raw values** (e.g.,
 `inflation_rate = 2.3%`), NOT normalized scores. COINr will handle
@@ -63,12 +67,14 @@ normalization.
 
 ------------------------------------------------------------------------
 
-### Stage 2: COINr Integration (Metadata + Coin Construction)
+### Stage 2: COINr Integration (Metadata + Coin Construction) ✅ COMPLETE
 
 **Goal**: Build the coin object with proper metadata
 
-**Files**: - `08_coinr_metadata.R` - Build iMeta from Excel framework -
-`09_coinr_build.R` - Coin construction and processing
+**Files**:
+- `09_coinr_metadata.R` ✅ - Build iMeta and validate against iData
+- `10_normalization_config.R` ✅ - Normalization pipeline with custom strategies
+- `analysis/build_gcceii_coin.R` ✅ - Full workflow with sensitivity analysis
 
 **Deliverables**:
 
@@ -92,12 +98,20 @@ coin <- Aggregate(coin, dset = "Normalised", f_ag = "a_amean")
 
 ------------------------------------------------------------------------
 
-### Stage 3: Dashboard + Export (Outputs)
+### Stage 3: Dashboard + Export (Outputs) 🔲 IN PROGRESS
 
 **Goal**: Generate all outputs from the coin object
 
-**Files**: - Analysis scripts for sensitivity analysis - Export
-functions for Excel/CSV - Dashboard using coin object
+**Completed**:
+- Sensitivity analysis (enabled in build script)
+- CSV export of results
+- PNG visualization export
+- RData workspace export
+
+**Remaining**:
+- Shiny dashboard
+- Excel export with formatting
+- DESCRIPTION/NAMESPACE for package installation
 
 ------------------------------------------------------------------------
 

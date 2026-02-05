@@ -1,0 +1,47 @@
+Package: gcceii
+Title: GCC Economic Integration Index
+Version: 0.1.0
+Authors@R: c(
+    person("GCC-Stat", "Economic Statistics Department",
+           email = "stats@gccstat.org",
+           role = c("aut", "cre")),
+    person("Kari", "Manninen", role = "aut")
+    )
+Description: R package for calculating the GCC Economic Integration Index
+    (GCCEII) using the COINr framework for composite indicator construction.
+    The index measures economic integration across the six Gulf Cooperation
+    Council countries (UAE, Bahrain, Saudi Arabia, Oman, Qatar, Kuwait) from
+    2015-2023. It covers six dimensions: Trade Integration, Financial
+    Integration, Labor & Mobility, Infrastructure, Sustainability, and
+    Convergence.
+License: file LICENSE
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+Depends:
+    R (>= 4.0.0)
+Imports:
+    COINr (>= 1.0.0),
+    dplyr,
+    tidyr,
+    stringr,
+    readr,
+    lubridate,
+    ggplot2,
+    tibble,
+    purrr
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    readxl,
+    jsonlite,
+    httr,
+    plotly,
+    shiny,
+    shinydashboard
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+URL: https://github.com/karimanninen/gcc_eii_beta
+BugReports: https://github.com/karimanninen/gcc_eii_beta/issues

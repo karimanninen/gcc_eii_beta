@@ -1,0 +1,34 @@
+# Development files
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.Rhistory$
+^\.DS_Store$
+
+# Git
+^\.git$
+^\.gitattributes$
+^\.github$
+
+# Documentation
+^README\.Rmd$
+^CLAUDE\.md$
+^LICENSE\.md$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+
+# CI/CD
+^\.travis\.yml$
+^\.gitlab-ci\.yml$
+^codecov\.yml$
+^\.lintr$
+^\.pre-commit-config\.yaml$
+
+# Data and analysis
+^data-raw$
+^analysis$
+^output$
+
+# Temporary files
+~$
+^.*\.xlsx$

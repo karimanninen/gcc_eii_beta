@@ -43,15 +43,16 @@ gcc_eii_beta/
 ├── R/                              # Package functions (source these)
 │   ├── 01_data_loading.R          # ✅ Data extraction → tidy datasets
 │   ├── 02_helpers.R               # ✅ Pure utility functions
-│   ├── 03_indicators_trade.R      # 🔲 Trade indicator calculations
-│   ├── 04_indicators_financial.R  # 🔲 Financial indicator calculations
-│   ├── 05_indicators_labor.R      # 🔲 Labor indicator calculations
-│   ├── 06_indicators_infrastructure.R # 🔲 Infrastructure indicators
-│   ├── 07_indicators_sustainability.R # 🔲 Sustainability indicators
-│   ├── 08_coinr_metadata.R        # 🔲 iMeta builder for COINr
-│   └── 09_coinr_build.R           # 🔲 Coin construction pipeline
+│   ├── 03_indicators_trade.R      # ✅ Trade indicator calculations
+│   ├── 04_indicators_financial.R  # ✅ Financial indicator calculations
+│   ├── 05_indicators_labor.R      # ✅ Labor indicator calculations
+│   ├── 06_indicators_infrastructure.R # ⚠️ Infrastructure (4 placeholders)
+│   ├── 07_indicators_sustainability.R # ✅ Sustainability indicators
+│   ├── 08_indicators_convergence.R    # ✅ Convergence indicators
+│   ├── 09_coinr_metadata.R        # ✅ iMeta builder for COINr
+│   └── 10_normalization_config.R  # ✅ Normalization pipeline
 ├── analysis/                       # Analysis scripts (not part of package)
-│   └── build_gcceii_coin.R        # 🔲 Main COINr workflow
+│   └── build_gcceii_coin.R        # ✅ Main COINr workflow (working)
 ├── data-raw/                       # Source data files (CSV)
 ├── output/                         # Generated results
 ├── DESCRIPTION                     # 🔲 Package metadata
@@ -61,6 +62,8 @@ gcc_eii_beta/
 ```
 
 **Legend:** ✅ Complete | 🔲 To be created | ⚠️ Needs revision
+
+**Completion Status:** 94.7% (90/95 functions implemented)
 
 ---
 
@@ -249,20 +252,31 @@ tibble(
 ## Current Priorities
 
 ### Immediate (This Week)
-1. Complete `03_indicators_trade.R` - extract all trade indicators as raw values
-2. Complete `04_indicators_financial.R` - extract financial/monetary indicators
-3. Test data loading pipeline end-to-end
+1. Complete infrastructure placeholders in `06_indicators_infrastructure.R`:
+   - `calc_railway_raw()` - GCC Railway data
+   - `calc_port_raw()` - UNCTAD LSCI/port data
+   - `calc_gccia_raw()` - GCCIA power grid data
+   - `calc_digital_raw()` - ITU ICT data
+2. Replace hardcoded estimates in trade indicators with real data sources
+3. Run full compilation test end-to-end
 
 ### Short-term (Next 2 Weeks)
-4. Complete remaining indicator modules (05, 06, 07)
-5. Create `08_coinr_metadata.R` - build iMeta from Excel framework
-6. Create `09_coinr_build.R` - full coin construction pipeline
+4. Create `DESCRIPTION` file - package metadata and dependencies
+5. Generate `NAMESPACE` - export key functions using roxygen2
+6. Add roxygen2 documentation to exported functions
+7. Create unit tests with `testthat`
 
 ### Medium-term (This Month)
-7. Add data treatment specifications for outlier-prone indicators
-8. Implement panel data handling (2015-2023 time series)
-9. Run sensitivity analysis (normalization, weighting, aggregation variations)
-10. Create diagnostic reports
+8. Set up GitHub Actions CI for R CMD check
+9. Implement SDMX data loader (replace placeholder)
+10. Create Shiny dashboard for results visualization
+11. Document methodology in vignette
+
+### Completed ✅
+- All indicator modules (01-05, 07-10) fully implemented
+- COINr workflow with pooled normalization
+- Sensitivity analysis (enabled in build script)
+- Panel data handling (2015-2023)
 
 ---
 
@@ -286,9 +300,11 @@ print(trade_raw)
 ### Build and Inspect Coin
 ```r
 library(COINr)
-source("R/09_coinr_build.R")
-coin <- build_gcceii_coin(2023)
-get_results(coin, dset = "Aggregated")
+# Run the full build script
+source("analysis/build_gcceii_coin.R")
+# Or inspect the saved workspace
+load("output/gcceii_coin_workspace.RData")
+get_results(gcceii_coin, dset = "Aggregated")
 ```
 
 ### Check Distributions
@@ -355,6 +371,25 @@ get_data(coin, dset = "Raw", iCodes = "trade_intensity")
 
 **Project Lead:** Economic Statistics Department, GCC-Stat  
 **Repository:** https://github.com/karimanninen/gcc_eii_beta
+
+---
+
+## Known Issues
+
+### Infrastructure Data Gaps
+Four infrastructure indicators return `NA_real_` due to missing external data:
+- Railway connectivity (needs GCC Railway Committee data)
+- Port connectivity (needs UNCTAD LSCI data)
+- GCCIA power grid (needs GCCIA annual reports)
+- Digital connectivity (needs ITU ICT Index data)
+
+### Hardcoded Estimates in Trade Module
+Some trade indicators use fallback estimates when data unavailable:
+- `ind_52` (services trade) - fixed estimates
+- `ind_56` (services percentage) - hardcoded percentages
+- `ind_63`, `ind_64` - fallback values
+
+These are documented in the code and should be replaced with real data sources.
 
 ---
 
