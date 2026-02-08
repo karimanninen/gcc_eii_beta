@@ -174,17 +174,23 @@ NORM_CONFIG <- list(
 #' @return Coin object with Treated dataset (Raw preserved for comparison)
 #' @export
 apply_winsorization <- function(coin, config = NORM_CONFIG) {
-  
+
   message("Applying Winsorization (5th-95th percentile)...")
-  
+
   # Check if any indicators need winsorization
   if (length(config$winsorize) == 0) {
     message("  No indicators to winsorize")
     return(coin)
   }
-  
-  # Copy raw data to treated
-  treated_data <- coin$Data$Raw
+
+  # Source from Imputed dataset if available, else Raw
+  if ("Imputed" %in% names(coin$Data)) {
+    source_dset <- "Imputed"
+    message("  Using Imputed data as source")
+  } else {
+    source_dset <- "Raw"
+  }
+  treated_data <- coin$Data[[source_dset]]
   
   # Track changes
   n_capped <- 0

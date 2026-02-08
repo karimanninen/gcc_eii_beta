@@ -33,6 +33,7 @@ Imports:
     purrr
 Suggests:
     testthat (>= 3.0.0),
+    Amelia,
     knitr,
     rmarkdown,
     readxl,
