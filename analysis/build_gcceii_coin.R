@@ -206,6 +206,15 @@ save(
   file = "output/gcceii_coin_workspace.RData"
 )
 
+# Export methodology XLSX (all data stages from coin object)
+export_methodology_xlsx(
+  coin = gcceii_coin,
+  iMeta = iMeta,
+  results = results,
+  gcc_trend = gcc_trend,
+  output_path = "output/GCCEII_Full_Methodology.xlsx"
+)
+
 message("✓ Results exported to output/\n")
 
 # =============================================================================
