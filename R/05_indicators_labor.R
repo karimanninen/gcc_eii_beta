@@ -7,8 +7,8 @@
 #   COINr will handle normalization in the build phase.
 #
 # Indicators:
-#   - ind_69_labor: GCC workers in other member states per 1000 population
-#   - ind_71_student: GCC students in other member states per 1000 population
+#   - ind_69_labor: Total GCC workers hosted per 1000 population
+#   - ind_71_student: Total GCC students hosted per 1000 population
 #   - ind_72_tourism: Intra-GCC tourism as % of total inbound
 #   - ind_lfpr: Labor force participation rate (%)
 #   - ind_unemployment: Unemployment rate (%)
@@ -17,6 +17,13 @@
 #   - Common Market (labor mobility, students)
 #   - Tourism data
 #   - Labor Force data
+#
+# Methodology Note:
+#   Labor and student mobility use the HOST-COUNTRY perspective:
+#   "How many GCC workers/students does each country host?"
+#   This uses aggregate totals (Citizen=KN_TTL) per host country,
+#   giving continuous coverage 2015-2023 without requiring the
+#   citizenship breakdown that is only available 2016-2021.
 #
 # =============================================================================
 
@@ -62,98 +69,138 @@ extract_labor_raw <- function(data_list, year_filter) {
 # INDIVIDUAL INDICATOR FUNCTIONS
 # =============================================================================
 
-#' Labor Mobility - GCC Workers (Raw)
+#' Labor Mobility - GCC Workers Hosted (Raw)
 #'
-#' Total GCC citizens working in other member states (govt + private)
-#' per 1000 population of origin country.
+#' Total GCC citizens working in each host country (govt + private)
+#' per 1000 host-country population. Uses aggregate totals per host
+#' country (Citizen=Total), giving coverage from 2000-2023.
 #'
 #' @param common_market Common Market dataset
 #' @param population_data Population dataset
 #' @param year_filter Year to calculate
 #' @return Tibble with uName, ind_69_labor
-#' Labor Mobility - GCC Workers (Raw)
 calc_labor_mobility_raw <- function(common_market, population_data, year_filter) {
-  
+
   if (is.null(common_market)) {
     return(tibble(uName = character(), ind_69_labor = numeric()))
   }
-  
+
   gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
-  
-  # Get workers in government + private sectors
+
+  # Host-country approach: total GCC workers hosted by each country
+  # citizen_code == "KN_TTL" gives the aggregate across all citizenships
   gcc_workers <- common_market %>%
     filter(
       indicator_code %in% c("KN_A2", "KN_A3"),
-      country_code == "KN_TTL",  # GCC total
+      citizen_code == "KN_TTL",
+      host_country %in% gcc_countries,
       year == year_filter
     ) %>%
-    filter(citizen_country %in% gcc_countries) %>%
-    group_by(citizen_country) %>%
+    group_by(host_country) %>%
     summarize(gcc_workers_count = sum(value, na.rm = TRUE), .groups = "drop") %>%
-    rename(country = citizen_country)
-  
+    rename(country = host_country)
+
   # Return NA if no data
   if (nrow(gcc_workers) == 0) {
     return(tibble(uName = gcc_countries, ind_69_labor = NA_real_))
   }
-  
+
   # Get population
   pop <- get_total_population(population_data, year_filter) %>%
     filter(!country %in% c("GCC", "Gulf Cooperation Council"))
-  
+
   labor_mobility <- gcc_workers %>%
     left_join(pop, by = "country") %>%
     mutate(ind_69_labor = (gcc_workers_count / population) * 1000) %>%
     select(uName = country, ind_69_labor)
-  
+
   # Ensure all countries present
   all_countries <- tibble(uName = gcc_countries)
   labor_mobility <- all_countries %>%
     left_join(labor_mobility, by = "uName")
-  
+
   return(labor_mobility)
 }
 
-#' Student Mobility (Raw)
+#' Student Mobility - GCC Students Hosted (Raw)
+#'
+#' Total GCC students in general education hosted by each country
+#' per 1000 host-country population. Uses aggregate totals per host
+#' country (Citizen=Total, Sex=Total).
+#'
+#' Note: UAE's KN_A9 Total row reports total enrollment (millions)
+#' rather than GCC students. A sanity check against the GCC-wide
+#' total excludes implausible values.
+#'
+#' @param common_market Common Market dataset
+#' @param population_data Population dataset
+#' @param year_filter Year to calculate
+#' @return Tibble with uName, ind_71_student
 calc_student_mobility_raw <- function(common_market, population_data, year_filter) {
-  
+
   if (is.null(common_market)) {
     return(tibble(uName = character(), ind_71_student = numeric()))
   }
-  
+
   gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
-  
-  # Get students in general education
+
+  # Host-country approach: total GCC students hosted by each country
+  # Filter sex_code == "KN_T" (Total) to avoid double-counting Male/Female
   gcc_students <- common_market %>%
     filter(
       indicator_code == "KN_A9",
-      country_code == "KN_TTL",  # GCC total
+      citizen_code == "KN_TTL",
+      sex_code == "KN_T",
+      host_country %in% gcc_countries,
       year == year_filter
     ) %>%
-    filter(citizen_country %in% gcc_countries) %>%
-    group_by(citizen_country) %>%
+    group_by(host_country) %>%
     summarize(gcc_students_count = sum(value, na.rm = TRUE), .groups = "drop") %>%
-    rename(country = citizen_country)
-  
+    rename(country = host_country)
+
   # Return NA if no data
   if (nrow(gcc_students) == 0) {
     return(tibble(uName = gcc_countries, ind_71_student = NA_real_))
   }
-  
+
+  # Sanity check: get GCC-wide total to catch countries reporting
+  # total enrollment instead of GCC students (known issue with UAE)
+  gcc_total <- common_market %>%
+    filter(
+      indicator_code == "KN_A9",
+      citizen_code == "KN_TTL",
+      sex_code == "KN_T",
+      country_code == "KN_TTL",
+      year == year_filter
+    ) %>%
+    pull(value) %>%
+    sum(na.rm = TRUE)
+
+  if (gcc_total > 0) {
+    implausible <- gcc_students$gcc_students_count > gcc_total
+    if (any(implausible)) {
+      bad_countries <- gcc_students$country[implausible]
+      warning(paste0("ind_71_student ", year_filter,
+                     ": excluding ", paste(bad_countries, collapse = ", "),
+                     " (host count exceeds GCC total of ", gcc_total, ")"))
+      gcc_students$gcc_students_count[implausible] <- NA_real_
+    }
+  }
+
   # Get population
   pop <- get_total_population(population_data, year_filter) %>%
     filter(!country %in% c("GCC", "Gulf Cooperation Council"))
-  
+
   student_mobility <- gcc_students %>%
     left_join(pop, by = "country") %>%
     mutate(ind_71_student = (gcc_students_count / population) * 1000) %>%
     select(uName = country, ind_71_student)
-  
+
   # Ensure all countries present
   all_countries <- tibble(uName = gcc_countries)
   student_mobility <- all_countries %>%
     left_join(student_mobility, by = "uName")
-  
+
   return(student_mobility)
 }
 
@@ -269,8 +316,8 @@ Main function:
   - extract_labor_raw()      : Extract all labor indicators
 
 Individual indicators:
-  - ind_69_labor: GCC workers per 1000 population
-  - ind_71_student: GCC students per 1000 population
+  - ind_69_labor: GCC workers hosted per 1000 population
+  - ind_71_student: GCC students hosted per 1000 population
   - ind_72_tourism: Intra-GCC tourism share (%)
   - ind_lfpr: Labor force participation rate (%)
   - ind_unemployment: Unemployment rate (%)
