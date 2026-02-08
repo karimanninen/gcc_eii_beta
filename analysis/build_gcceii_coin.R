@@ -117,6 +117,24 @@ gcceii_coin <- new_coin(
 message("✓ Coin built\n")
 
 # =============================================================================
+# STEP 5b: IMPUTE MISSING DATA
+# =============================================================================
+# Two-pass strategy:
+#   Pass 1: Linear interpolation/extrapolation within each country's time
+#           series (fills 1-2 year gaps)
+#   Pass 2: EM algorithm (Amelia) for remaining NAs (fills indicators where
+#           a country is completely missing). Falls back to year-group median
+#           if Amelia is not installed.
+#
+# Imputed values are logged in coin$Analysis$Imputation.
+# Use get_imputation_summary(coin) to inspect what was imputed.
+# =============================================================================
+
+message("Step 5b: Imputing missing data...")
+
+gcceii_coin <- impute_gcceii(gcceii_coin)
+
+# =============================================================================
 # STEP 6: NORMALIZE INDICATORS (Custom Strategy)
 # =============================================================================
 

@@ -474,6 +474,20 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
     select(Dimension = iCode, Name = iName, Weight) %>%
     mutate(Weight_Pct = paste0(Weight * 100, "%"))
 
+  # --- Sheet 9: Imputation Log (if available) ---
+  sheet_imputation <- if (!is.null(coin$Analysis$Imputation) &&
+                          nrow(coin$Analysis$Imputation) > 0) {
+    coin$Analysis$Imputation %>%
+      mutate(
+        Country = str_remove(uCode, "_\\d{4}$"),
+        Year = as.integer(str_extract(uCode, "\\d{4}$"))
+      ) %>%
+      select(Country, Year, indicator, method, imputed_value) %>%
+      arrange(indicator, Country, Year)
+  } else {
+    tibble(Note = "No imputation performed")
+  }
+
   # --- Write workbook ---
   wb <- openxlsx::createWorkbook()
 
@@ -485,7 +499,8 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
     "5_Results_Summary" = sheet_results,
     "6_Rankings" = sheet_rankings,
     "7_GCC_Trend" = sheet_trend,
-    "8_Weights" = sheet_weights
+    "8_Weights" = sheet_weights,
+    "9_Imputation_Log" = sheet_imputation
   )
 
   for (sheet_name in names(sheets)) {
@@ -497,6 +512,274 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
   message(paste("✓ Methodology XLSX saved to", output_path))
 
   return(invisible(output_path))
+}
+
+# =============================================================================
+# SECTION 8: IMPUTATION
+# =============================================================================
+
+#' Impute Missing Data in GCCEII Coin
+#'
+#' Two-pass imputation strategy for panel data (uCode format: "BHR_2023"):
+#'   Pass 1: Linear interpolation/extrapolation within each country's time
+#'           series. Handles 1-2 year gaps where a country has partial data.
+#'           Uses stats::approx() with rule=2 for boundary extrapolation.
+#'   Pass 2: EM algorithm (Amelia package) for remaining NAs, typically
+#'           countries completely missing for an indicator. Falls back to
+#'           year-group median if Amelia is unavailable.
+#'
+#' Imputed values are tracked in coin$Analysis$Imputation (a tibble with
+#' uCode, indicator, method, and imputed_value for each filled cell).
+#'
+#' @param coin COINr coin object with Raw data
+#' @return Coin object with Imputed dataset and imputation log
+#' @export
+impute_gcceii <- function(coin) {
+
+  message("\n=======================================================")
+  message("  IMPUTATION")
+  message("=======================================================\n")
+
+  # Extract raw data
+  raw_df <- coin$Data$Raw
+  imputed_df <- raw_df  # work on a copy
+
+  # Parse panel structure from uCode
+  uCodes <- raw_df$uCode
+  panel_ids <- str_remove(uCodes, "_\\d{4}$")
+  time_ids <- as.integer(str_extract(uCodes, "\\d{4}$"))
+
+  # Indicator columns (everything except uCode)
+  ind_cols <- setdiff(names(raw_df), "uCode")
+
+  # Initialise imputation log
+  log_rows <- list()
+
+  # =========================================================================
+  # PASS 1: Linear interpolation / extrapolation per country time series
+  # =========================================================================
+  message("Pass 1: Linear interpolation/extrapolation...")
+
+  n_interp <- 0
+  unique_panels <- unique(panel_ids)
+
+  for (ind in ind_cols) {
+    vals <- raw_df[[ind]]
+    new_vals <- vals
+
+    for (pid in unique_panels) {
+      idx <- which(panel_ids == pid)
+      times <- time_ids[idx]
+      v <- vals[idx]
+
+      non_na <- !is.na(v)
+      na_pos <- is.na(v)
+
+      if (sum(non_na) >= 2 && any(na_pos)) {
+        # rule = 2: extrapolate using boundary values at series ends
+        interp <- approx(times[non_na], v[non_na], xout = times, rule = 2)
+
+        # Only fill NAs, keep originals
+        new_vals[idx] <- ifelse(na_pos, interp$y, v)
+
+        # Log each imputed cell
+        imputed_idx <- idx[na_pos]
+        for (ii in imputed_idx) {
+          n_interp <- n_interp + 1
+          log_rows[[length(log_rows) + 1]] <- tibble(
+            uCode = uCodes[ii],
+            indicator = ind,
+            method = "linear_interp",
+            imputed_value = new_vals[ii]
+          )
+        }
+      }
+    }
+
+    imputed_df[[ind]] <- new_vals
+  }
+
+  message(paste("  Imputed", n_interp, "values via linear interpolation/extrapolation"))
+
+  # =========================================================================
+  # PASS 2: EM algorithm for remaining NAs
+  # =========================================================================
+  # Identify columns with remaining NAs (skip all-NA columns like
+  # infrastructure placeholders — EM cannot impute those)
+  remaining_na_per_col <- sapply(ind_cols, function(ic) sum(is.na(imputed_df[[ic]])))
+  n_rows <- nrow(imputed_df)
+  em_eligible <- names(remaining_na_per_col[remaining_na_per_col > 0 &
+                                             remaining_na_per_col < n_rows])
+  remaining_na <- sum(remaining_na_per_col[em_eligible])
+
+  if (remaining_na > 0) {
+    message(paste("Pass 2: EM imputation for", remaining_na, "remaining NAs",
+                  "across", length(em_eligible), "indicators..."))
+
+    em_success <- FALSE
+
+    if (requireNamespace("Amelia", quietly = TRUE)) {
+      # Prepare numeric matrix — only columns with partial NAs plus
+      # complete columns (Amelia needs variance in each column)
+      usable_cols <- names(remaining_na_per_col[remaining_na_per_col < n_rows])
+      em_input <- as.data.frame(imputed_df[, usable_cols, drop = FALSE])
+
+      amelia_result <- tryCatch({
+        Amelia::amelia(em_input, m = 1, p2s = 0)
+      }, error = function(e) {
+        warning(paste("Amelia EM failed:", e$message, "- falling back to group median"))
+        NULL
+      })
+
+      if (!is.null(amelia_result)) {
+        em_output <- as_tibble(amelia_result$imputations[[1]])
+        n_em <- 0
+
+        for (ind in em_eligible) {
+          was_na <- is.na(imputed_df[[ind]])
+          now_filled <- !is.na(em_output[[ind]])
+          em_filled <- was_na & now_filled
+
+          if (any(em_filled)) {
+            imputed_df[[ind]][em_filled] <- em_output[[ind]][em_filled]
+
+            for (ii in which(em_filled)) {
+              n_em <- n_em + 1
+              log_rows[[length(log_rows) + 1]] <- tibble(
+                uCode = uCodes[ii],
+                indicator = ind,
+                method = "EM",
+                imputed_value = em_output[[ind]][ii]
+              )
+            }
+          }
+        }
+
+        message(paste("  Imputed", n_em, "values via EM algorithm"))
+        em_success <- TRUE
+      }
+    } else {
+      message("  Amelia package not installed — falling back to group median")
+    }
+
+    # Fallback: year-group median for anything EM could not fill
+    if (!em_success) {
+      fb <- impute_year_median(imputed_df, em_eligible, uCodes, time_ids)
+      imputed_df <- fb$data
+      log_rows <- c(log_rows, fb$log_rows)
+    }
+  } else {
+    message("Pass 2: No remaining NAs (in partially-observed indicators) — skipping")
+  }
+
+  # =========================================================================
+  # Store results
+  # =========================================================================
+  coin$Data$Imputed <- imputed_df
+
+  # Build and store imputation log
+  if (length(log_rows) > 0) {
+    imputation_log <- bind_rows(log_rows)
+  } else {
+    imputation_log <- tibble(
+      uCode = character(), indicator = character(),
+      method = character(), imputed_value = numeric()
+    )
+  }
+  coin$Analysis$Imputation <- imputation_log
+
+  # Final summary
+  total_cells <- length(ind_cols) * nrow(raw_df)
+  total_imputed <- nrow(imputation_log)
+  pct_imputed <- round(total_imputed / total_cells * 100, 1)
+  still_na <- sum(is.na(as.matrix(imputed_df[, ind_cols])))
+
+  message(paste("\n✓ Imputation complete"))
+  message(paste("  Total indicator cells:", total_cells))
+  message(paste("  Imputed:", total_imputed, "(", pct_imputed, "%)"))
+  message(paste("  Remaining NAs:", still_na,
+                "(all-NA indicators, e.g. infrastructure placeholders)"))
+  message("=======================================================\n")
+
+  return(coin)
+}
+
+
+#' Year-Group Median Imputation (Fallback)
+#'
+#' For each indicator with remaining NAs, replaces missing values with
+#' the median of other countries in the same year.
+#'
+#' @param imputed_df Data frame being imputed
+#' @param ind_cols Indicator columns to impute
+#' @param uCodes Character vector of unit codes
+#' @param time_ids Integer vector of years per row
+#' @return List with $data (imputed data frame) and $log_rows (list of tibbles)
+#' @keywords internal
+impute_year_median <- function(imputed_df, ind_cols, uCodes, time_ids) {
+
+  log_rows <- list()
+  n_med <- 0
+
+  for (ind in ind_cols) {
+    na_idx <- which(is.na(imputed_df[[ind]]))
+
+    for (ii in na_idx) {
+      yr <- time_ids[ii]
+      same_year <- which(time_ids == yr)
+      year_vals <- imputed_df[[ind]][same_year]
+      med_val <- median(year_vals, na.rm = TRUE)
+
+      if (!is.na(med_val)) {
+        imputed_df[[ind]][ii] <- med_val
+        n_med <- n_med + 1
+        log_rows[[length(log_rows) + 1]] <- tibble(
+          uCode = uCodes[ii],
+          indicator = ind,
+          method = "year_median",
+          imputed_value = med_val
+        )
+      }
+    }
+  }
+
+  message(paste("  Imputed", n_med, "values via year-group median (fallback)"))
+  list(data = imputed_df, log_rows = log_rows)
+}
+
+
+#' Get Imputation Summary
+#'
+#' Diagnostic function to inspect which values were imputed and by what method.
+#'
+#' @param coin COINr coin object (after impute_gcceii)
+#' @return Tibble summarising imputation by indicator and method
+#' @export
+get_imputation_summary <- function(coin) {
+
+  if (is.null(coin$Analysis$Imputation) || nrow(coin$Analysis$Imputation) == 0) {
+    message("No imputation log found. Run impute_gcceii() first.")
+    return(tibble())
+  }
+
+  log <- coin$Analysis$Imputation
+
+  # Per-indicator summary
+  summary <- log %>%
+    mutate(
+      Country = str_remove(uCode, "_\\d{4}$"),
+      Year = as.integer(str_extract(uCode, "\\d{4}$"))
+    ) %>%
+    group_by(indicator, method) %>%
+    summarize(
+      n_imputed = n(),
+      countries = paste(sort(unique(Country)), collapse = ", "),
+      years = paste(sort(unique(Year)), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    arrange(indicator, method)
+
+  return(summary)
 }
 
 # =============================================================================
@@ -523,6 +806,10 @@ Data helpers:
   - safe_year_filter()       : Safe year filtering with fallback
   - get_indicator_value()    : Extract single indicator value
   - extract_indicator_wide() : Long to wide format
+
+Imputation:
+  - impute_gcceii()          : Two-pass imputation (linear + EM)
+  - get_imputation_summary() : Inspect imputed cells by method
 
 Export:
   - export_methodology_xlsx(): Full methodology workbook
