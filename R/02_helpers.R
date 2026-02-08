@@ -377,6 +377,129 @@ population_weighted_mean <- function(values, pop_weights) {
 }
 
 # =============================================================================
+# SECTION 7: EXCEL EXPORT
+# =============================================================================
+
+#' Export Full Methodology XLSX
+#'
+#' Exports the complete GCCEII methodology workbook with all data stages
+#' extracted directly from the coin object and supporting data frames.
+#'
+#' @param coin COINr coin object (after aggregation)
+#' @param iMeta Indicator metadata tibble
+#' @param results Results data frame from get_results()
+#' @param gcc_trend GCC trend summary data frame
+#' @param output_path Path for output XLSX file
+#' @export
+export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
+                                    output_path = "output/GCCEII_Full_Methodology.xlsx") {
+
+  if (!requireNamespace("openxlsx", quietly = TRUE)) {
+    message("Package 'openxlsx' not installed. Install with: install.packages('openxlsx')")
+    message("Skipping XLSX export.")
+    return(invisible(NULL))
+  }
+
+  message("Exporting GCCEII Full Methodology XLSX...")
+
+  # Helper to split uCode back into Country and Year
+  split_ucode <- function(df) {
+    df %>%
+      mutate(
+        Country = str_remove(uCode, "_\\d{4}$"),
+        Year = as.integer(str_extract(uCode, "\\d{4}$"))
+      ) %>%
+      select(Country, Year, everything(), -uCode) %>%
+      arrange(Country, Year)
+  }
+
+  # --- Sheet 1: Metadata ---
+  sheet_meta <- iMeta %>%
+    select(iCode, iName, Level, Parent, Weight, Direction, Type)
+
+  # --- Sheet 2: Raw Data ---
+  sheet_raw <- split_ucode(coin$Data$Raw)
+
+  # --- Sheet 3: Normalised Data ---
+  sheet_norm <- if ("Normalised" %in% names(coin$Data)) {
+    split_ucode(coin$Data$Normalised)
+  } else {
+    tibble(Note = "Normalised data not available")
+  }
+
+  # --- Sheet 4: Aggregated Data ---
+  sheet_agg <- if ("Aggregated" %in% names(coin$Data)) {
+    split_ucode(coin$Data$Aggregated)
+  } else {
+    tibble(Note = "Aggregated data not available")
+  }
+
+  # --- Sheet 5: Results Summary ---
+  sheet_results <- results %>%
+    mutate(
+      Country = str_remove(uCode, "_\\d{4}$"),
+      Year = as.integer(str_extract(uCode, "\\d{4}$"))
+    ) %>%
+    select(Country, Year, Trade, Financial, Labor,
+           Infrastructure, Sustainability, Convergence, Index) %>%
+    arrange(Country, Year)
+
+  # --- Sheet 6: Rankings ---
+  dim_cols <- c("Trade", "Financial", "Labor", "Infrastructure",
+                "Sustainability", "Convergence", "Index")
+  years <- sort(unique(sheet_results$Year))
+
+  sheet_rankings <- sheet_results %>%
+    select(Country, Year, Index) %>%
+    pivot_wider(names_from = Year, values_from = Index,
+                names_prefix = "Index_") %>%
+    arrange(desc(across(last_col())))
+
+  # Add rank columns
+  for (yr in years) {
+    idx_col <- paste0("Index_", yr)
+    rank_col <- paste0("Rank_", yr)
+    if (idx_col %in% names(sheet_rankings)) {
+      sheet_rankings <- sheet_rankings %>%
+        mutate(!!rank_col := rank(-!!sym(idx_col), na.last = "keep"))
+    }
+  }
+
+  # --- Sheet 7: GCC Trend ---
+  sheet_trend <- gcc_trend
+
+  # --- Sheet 8: Weights ---
+  sheet_weights <- iMeta %>%
+    filter(Level == 2) %>%
+    select(Dimension = iCode, Name = iName, Weight) %>%
+    mutate(Weight_Pct = paste0(Weight * 100, "%"))
+
+  # --- Write workbook ---
+  wb <- openxlsx::createWorkbook()
+
+  sheets <- list(
+    "1_Metadata" = sheet_meta,
+    "2_Raw_Data" = sheet_raw,
+    "3_Normalised_Data" = sheet_norm,
+    "4_Aggregated_Data" = sheet_agg,
+    "5_Results_Summary" = sheet_results,
+    "6_Rankings" = sheet_rankings,
+    "7_GCC_Trend" = sheet_trend,
+    "8_Weights" = sheet_weights
+  )
+
+  for (sheet_name in names(sheets)) {
+    openxlsx::addWorksheet(wb, sheet_name)
+    openxlsx::writeData(wb, sheet_name, sheets[[sheet_name]])
+  }
+
+  openxlsx::saveWorkbook(wb, output_path, overwrite = TRUE)
+  message(paste("✓ Methodology XLSX saved to", output_path))
+
+  return(invisible(output_path))
+}
+
+# =============================================================================
 # MODULE LOAD MESSAGE
 # =============================================================================
 
@@ -400,6 +523,9 @@ Data helpers:
   - safe_year_filter()       : Safe year filtering with fallback
   - get_indicator_value()    : Extract single indicator value
   - extract_indicator_wide() : Long to wide format
+
+Export:
+  - export_methodology_xlsx(): Full methodology workbook
 
 Validation:
   - check_gcc_complete()     : Check all 6 countries present

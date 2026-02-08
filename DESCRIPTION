@@ -36,6 +36,7 @@ Suggests:
     knitr,
     rmarkdown,
     readxl,
+    openxlsx,
     jsonlite,
     httr,
     plotly,
