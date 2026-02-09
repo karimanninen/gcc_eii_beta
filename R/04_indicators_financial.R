@@ -238,7 +238,7 @@ calc_stock_market_raw <- function(common_market, year_filter) {
   # GCC-open companies
   gcc_companies <- common_market %>%
     filter(
-      indicator == "No. of Stock Companies Permited for GCC Citizens to Trade & Own",
+      indicator == "No. of Stock Companies Permitted for GCC Citizens to Trade and Own",
       year == year_filter
     ) %>%
     filter(!country %in% c("GCC", "Gulf Cooperation Council")) %>%

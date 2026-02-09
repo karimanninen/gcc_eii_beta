@@ -129,14 +129,26 @@ NORM_CONFIG <- list(
   # ensures scores are comparable over time.
   # -------------------------------------------------------------------------
   
+  # =========================================================================
+  # GOALPOST NORMALIZATION (fixed reference points, no data-driven rescaling)
+  # =========================================================================
+  # Rationale: These indicators are already on a meaningful 0-100 scale
+  # (e.g., percentages). Data-driven min-max would stretch a narrow range
+  # to 0-100, exaggerating small differences. Instead, we use fixed
+  # goalposts [0, 100] so the raw percentage IS the score.
+  # -------------------------------------------------------------------------
+
+  goalpost = c(
+    "ind_44_stock"         # Stock market openness (composite % already 0-100)
+  ),
+
   minmax = c(
     # Trade (well-behaved, CV < 45%)
     "ind_56",              # CV 27% - Services % of total trade
     "ind_63",              # CV 41% - Intermediate goods share
     "ind_64",              # CV 13% - Trade diversification
-    
+
     # Financial (bounded ratios)
-    "ind_44_stock",        # CV 3% - Stock market openness (already 0-100)
     "ind_bank_depth",      # CV 37% - Banking assets % GDP
     
     # Labor
@@ -235,6 +247,30 @@ apply_winsorization <- function(coin, config = NORM_CONFIG) {
 }
 
 # =============================================================================
+# GOALPOST NORMALIZATION FUNCTION
+# =============================================================================
+
+#' Goalpost Normalization (fixed reference points)
+#'
+#' Normalizes using fixed goalposts rather than data-driven min/max.
+#' Ideal for indicators already on a meaningful scale (e.g., percentages
+#' where 0 = none and 100 = full). Unlike min-max, this does not stretch
+#' a narrow data range to 0-100, preserving the original scale's meaning.
+#'
+#' @param x Numeric vector of raw values
+#' @param gposts Numeric vector of length 2: c(lower_goalpost, upper_goalpost).
+#'   Default c(0, 100) for percentage indicators.
+#' @param l_u Numeric vector of length 2: c(lower_output, upper_output).
+#'   Default c(0, 100).
+#' @return Normalized numeric vector, capped at l_u bounds
+#' @export
+n_goalpost <- function(x, gposts = c(0, 100), l_u = c(0, 100)) {
+  result <- (x - gposts[1]) / (gposts[2] - gposts[1]) * (l_u[2] - l_u[1]) + l_u[1]
+  result <- pmax(pmin(result, l_u[2]), l_u[1])
+  return(result)
+}
+
+# =============================================================================
 # STEP 2: NORMALIZATION FUNCTION
 # =============================================================================
 
@@ -263,7 +299,7 @@ apply_custom_normalisation <- function(coin, config = NORM_CONFIG) {
   
   # Build individual specifications
   indiv_specs <- list()
-  
+
   # Z-score for zero-crossing indicators
   for (ind in config$zscore) {
     if (ind %in% names(coin$Data[[source_dset]])) {
@@ -271,10 +307,21 @@ apply_custom_normalisation <- function(coin, config = NORM_CONFIG) {
       message(paste("  ", ind, "-> z-score (OCA criterion)"))
     }
   }
-  
+
+  # Goalpost normalization for indicators already on a meaningful 0-100 scale
+  for (ind in config$goalpost) {
+    if (ind %in% names(coin$Data[[source_dset]])) {
+      indiv_specs[[ind]] <- list(
+        f_n = "n_goalpost",
+        f_n_para = list(gposts = c(0, 100), l_u = c(0, 100))
+      )
+      message(paste("  ", ind, "-> goalpost [0,100] (meaningful % scale)"))
+    }
+  }
+
   # Apply normalization
   # Global default: min-max 0-100
-  # Individual: z-score for specified indicators
+  # Individual: z-score or goalpost for specified indicators
   coin <- Normalise(
     coin,
     dset = source_dset,
@@ -385,6 +432,7 @@ run_normalization_pipeline <- function(coin, config = NORM_CONFIG) {
   message("=======================================================")
   message(paste("  Winsorized (5-95%):", length(config$winsorize), "indicators"))
   message(paste("  Z-score (rescaled):", length(config$zscore), "indicators"))
+  message(paste("  Goalpost (fixed):  ", length(config$goalpost), "indicators"))
   message(paste("  Min-max (0-100):   ", length(config$minmax), "indicators"))
   message("=======================================================\n")
   
@@ -431,6 +479,7 @@ analyze_distributions <- function(coin, config = NORM_CONFIG) {
       winsorized = indicator %in% config$winsorize,
       norm_method = case_when(
         indicator %in% config$zscore ~ "z-score",
+        indicator %in% config$goalpost ~ "goalpost",
         TRUE ~ "min-max"
       ),
       # Flag potential issues
@@ -575,6 +624,13 @@ print_normalization_summary <- function(config = NORM_CONFIG) {
     cat(paste("  -", ind, "\n"))
   }
   
+  cat("\nGOALPOST NORMALIZATION (fixed 0-100 reference)\n")
+  cat("Purpose: Preserve raw percentage scale for bounded indicators\n")
+  cat("Indicators:", length(config$goalpost), "\n")
+  for (ind in config$goalpost) {
+    cat(paste("  -", ind, "\n"))
+  }
+
   cat("\nSTEP 3: MIN-MAX NORMALIZATION (0-100)\n")
   cat("Purpose: Standard scaling for well-behaved distributions\n")
   cat("Indicators:", length(config$minmax), "\n")
@@ -609,15 +665,17 @@ Diagnostics:
   - print_normalization_summary() : Display strategy
 
 Configuration:
-  - NORM_CONFIG$winsorize : 9 indicators (range > 15x)
-  - NORM_CONFIG$zscore    : 3 indicators (zero-crossing)
-  - NORM_CONFIG$minmax    : 16 indicators (standard)
+  - NORM_CONFIG$winsorize : 9 indicators  (range > 15x)
+  - NORM_CONFIG$zscore    : 3 indicators  (zero-crossing)
+  - NORM_CONFIG$goalpost  : 1 indicator   (fixed 0-100 scale)
+  - NORM_CONFIG$minmax    : 15 indicators (standard)
 
 Methodology:
   1. Winsorize at 5th/95th percentile (reduces outlier impact)
   2. Z-score for OCA criteria (deviation from GCC mean)
-  3. Min-max 0-100 for all others (pooled across years)
-  4. Rescale z-scores to 0-100 (for aggregation)
+  3. Goalpost for meaningful percentages (fixed 0-100 bounds)
+  4. Min-max 0-100 for all others (pooled across years)
+  5. Rescale z-scores to 0-100 (for aggregation)
 
 =======================================================
 ")
