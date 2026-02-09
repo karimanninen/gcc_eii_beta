@@ -518,6 +518,82 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
 # SECTION 8: IMPUTATION
 # =============================================================================
 
+#' Pre-impute Student Mobility via Linear Extrapolation
+#'
+#' Fills ind_71_student NAs for years outside the 2016-2021 data window
+#' using linear extrapolation from the two nearest observed years.
+#' This runs on the Raw dataset before general imputation so that
+#' Raw_Data stays clean (NAs for unobserved years) and the extrapolated
+#' values appear in the Imputed dataset.
+#'
+#' Extrapolation logic:
+#'   - 2015: slope from 2016-2017, projected back 1 year
+#'   - 2022: slope from 2020-2021, projected forward 1 year
+#'   - 2023: slope from 2020-2021, projected forward 2 years
+#'   - Values are floored at 0 (student counts cannot be negative)
+#'
+#' @param coin COINr coin object with Raw data
+#' @return Coin object with ind_71_student NAs filled in Raw
+#' @export
+pre_impute_student_mobility <- function(coin) {
+
+  ind <- "ind_71_student"
+  if (!ind %in% names(coin$Data$Raw)) {
+    message("  ind_71_student not found in Raw data, skipping pre-imputation")
+    return(coin)
+  }
+
+  message("Pre-imputing ind_71_student (linear extrapolation)...")
+
+  raw_df <- coin$Data$Raw
+  uCodes <- raw_df$uCode
+  panel_ids <- str_remove(uCodes, "_\\d{4}$")
+  time_ids  <- as.integer(str_extract(uCodes, "\\d{4}$"))
+
+  vals <- raw_df[[ind]]
+  n_filled <- 0
+
+  for (pid in unique(panel_ids)) {
+    idx <- which(panel_ids == pid)
+    times <- time_ids[idx]
+    v <- vals[idx]
+
+    non_na <- !is.na(v)
+    na_pos <- is.na(v)
+
+    if (sum(non_na) >= 2 && any(na_pos)) {
+      # Linear extrapolation using the two nearest boundary years
+      for (i in which(na_pos)) {
+        t_target <- times[i]
+        obs_times <- times[non_na]
+        obs_vals  <- v[non_na]
+
+        if (t_target < min(obs_times)) {
+          # Backward: use two earliest observed years
+          ord <- order(obs_times)
+          t1 <- obs_times[ord[1]]; t2 <- obs_times[ord[2]]
+          v1 <- obs_vals[ord[1]];  v2 <- obs_vals[ord[2]]
+        } else {
+          # Forward: use two latest observed years
+          ord <- order(obs_times, decreasing = TRUE)
+          t1 <- obs_times[ord[2]]; t2 <- obs_times[ord[1]]
+          v1 <- obs_vals[ord[2]];  v2 <- obs_vals[ord[1]]
+        }
+
+        slope <- (v2 - v1) / (t2 - t1)
+        extrap <- max(0, v1 + slope * (t_target - t1))
+        vals[idx[i]] <- extrap
+        n_filled <- n_filled + 1
+      }
+    }
+  }
+
+  coin$Data$Raw[[ind]] <- vals
+  message(paste("  Extrapolated", n_filled, "values for ind_71_student"))
+
+  return(coin)
+}
+
 #' Impute Missing Data in GCCEII Coin
 #'
 #' Two-pass imputation strategy for panel data (uCode format: "BHR_2023"):

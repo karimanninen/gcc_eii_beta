@@ -117,6 +117,20 @@ gcceii_coin <- new_coin(
 message("✓ Coin built\n")
 
 # =============================================================================
+# STEP 5a: PRE-IMPUTATION (custom extrapolation for specific indicators)
+# =============================================================================
+# ind_71_student has nationality-level data only for 2016-2021. Raw_Data
+# contains NA for 2015, 2022-2023. This step linearly extrapolates from the
+# nearest two observed years before general imputation runs.
+# =============================================================================
+
+message("Step 5a: Pre-imputing specific indicators...")
+
+gcceii_coin <- pre_impute_student_mobility(gcceii_coin)
+
+message("✓ Pre-imputation complete\n")
+
+# =============================================================================
 # STEP 5b: IMPUTE MISSING DATA
 # =============================================================================
 # Two-pass strategy:
