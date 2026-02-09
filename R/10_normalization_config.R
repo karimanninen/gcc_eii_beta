@@ -142,6 +142,20 @@ NORM_CONFIG <- list(
     "ind_44_stock"         # Stock market openness (composite % already 0-100)
   ),
 
+  # =========================================================================
+  # BOUNDED MIN-MAX (data-driven min/max, but compressed output range)
+  # =========================================================================
+  # Rationale: Some indicators are structurally constrained - the metric
+  # can never reach high values due to external limits (e.g., only ~29 GCC
+  # banks exist, so banks-per-million will always be low for large countries).
+  # A floor above 0 avoids over-penalizing countries for structural factors
+  # outside their control, while still preserving relative ordering.
+  # -------------------------------------------------------------------------
+
+  bounded_minmax = list(
+    ind_39_banking = c(50, 100)  # Floor at 50: few distinct GCC banks limits per-capita metric
+  ),
+
   minmax = c(
     # Trade (well-behaved, CV < 45%)
     "ind_56",              # CV 27% - Services % of total trade
@@ -319,9 +333,21 @@ apply_custom_normalisation <- function(coin, config = NORM_CONFIG) {
     }
   }
 
+  # Bounded min-max for structurally constrained indicators
+  for (ind in names(config$bounded_minmax)) {
+    if (ind %in% names(coin$Data[[source_dset]])) {
+      bounds <- config$bounded_minmax[[ind]]
+      indiv_specs[[ind]] <- list(
+        f_n = "n_minmax",
+        f_n_para = list(l_u = bounds)
+      )
+      message(paste("  ", ind, "-> min-max [", bounds[1], ",", bounds[2], "] (bounded)"))
+    }
+  }
+
   # Apply normalization
   # Global default: min-max 0-100
-  # Individual: z-score or goalpost for specified indicators
+  # Individual: z-score, goalpost, or bounded min-max for specified indicators
   coin <- Normalise(
     coin,
     dset = source_dset,
@@ -430,10 +456,11 @@ run_normalization_pipeline <- function(coin, config = NORM_CONFIG) {
   message("\n=======================================================")
   message("  NORMALIZATION SUMMARY")
   message("=======================================================")
-  message(paste("  Winsorized (5-95%):", length(config$winsorize), "indicators"))
-  message(paste("  Z-score (rescaled):", length(config$zscore), "indicators"))
-  message(paste("  Goalpost (fixed):  ", length(config$goalpost), "indicators"))
-  message(paste("  Min-max (0-100):   ", length(config$minmax), "indicators"))
+  message(paste("  Winsorized (5-95%): ", length(config$winsorize), "indicators"))
+  message(paste("  Z-score (rescaled): ", length(config$zscore), "indicators"))
+  message(paste("  Goalpost (fixed):   ", length(config$goalpost), "indicators"))
+  message(paste("  Bounded min-max:    ", length(config$bounded_minmax), "indicators"))
+  message(paste("  Min-max (0-100):    ", length(config$minmax), "indicators"))
   message("=======================================================\n")
   
   return(coin)
@@ -480,6 +507,7 @@ analyze_distributions <- function(coin, config = NORM_CONFIG) {
       norm_method = case_when(
         indicator %in% config$zscore ~ "z-score",
         indicator %in% config$goalpost ~ "goalpost",
+        indicator %in% names(config$bounded_minmax) ~ "bounded-minmax",
         TRUE ~ "min-max"
       ),
       # Flag potential issues
@@ -631,6 +659,14 @@ print_normalization_summary <- function(config = NORM_CONFIG) {
     cat(paste("  -", ind, "\n"))
   }
 
+  cat("\nBOUNDED MIN-MAX (compressed output range)\n")
+  cat("Purpose: Floor above 0 for structurally constrained indicators\n")
+  cat("Indicators:", length(config$bounded_minmax), "\n")
+  for (ind in names(config$bounded_minmax)) {
+    bounds <- config$bounded_minmax[[ind]]
+    cat(paste("  -", ind, "-> [", bounds[1], ",", bounds[2], "]\n"))
+  }
+
   cat("\nSTEP 3: MIN-MAX NORMALIZATION (0-100)\n")
   cat("Purpose: Standard scaling for well-behaved distributions\n")
   cat("Indicators:", length(config$minmax), "\n")
@@ -665,17 +701,19 @@ Diagnostics:
   - print_normalization_summary() : Display strategy
 
 Configuration:
-  - NORM_CONFIG$winsorize : 9 indicators  (range > 15x)
-  - NORM_CONFIG$zscore    : 3 indicators  (zero-crossing)
-  - NORM_CONFIG$goalpost  : 1 indicator   (fixed 0-100 scale)
-  - NORM_CONFIG$minmax    : 15 indicators (standard)
+  - NORM_CONFIG$winsorize      : 9 indicators  (range > 15x)
+  - NORM_CONFIG$zscore         : 3 indicators  (zero-crossing)
+  - NORM_CONFIG$goalpost       : 1 indicator   (fixed 0-100 scale)
+  - NORM_CONFIG$bounded_minmax : 1 indicator   (compressed range)
+  - NORM_CONFIG$minmax         : 15 indicators (standard)
 
 Methodology:
   1. Winsorize at 5th/95th percentile (reduces outlier impact)
   2. Z-score for OCA criteria (deviation from GCC mean)
   3. Goalpost for meaningful percentages (fixed 0-100 bounds)
-  4. Min-max 0-100 for all others (pooled across years)
-  5. Rescale z-scores to 0-100 (for aggregation)
+  4. Bounded min-max for structurally constrained indicators
+  5. Min-max 0-100 for all others (pooled across years)
+  6. Rescale z-scores to 0-100 (for aggregation)
 
 =======================================================
 ")
