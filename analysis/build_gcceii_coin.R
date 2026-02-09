@@ -300,18 +300,31 @@ sa_source <- if ("Treated" %in% names(gcceii_coin$Data)) "Treated" else
              if ("Imputed" %in% names(gcceii_coin$Data)) "Imputed" else "Raw"
 
 sa_results_list <- vector("list", sa_N)
+sa_errors <- character(0)
 
 for (sa_i in seq_len(sa_N)) {
   sa_norm <- sample(sa_norm_methods, 1)
   sa_agg  <- sample(sa_agg_methods, 1)
 
+  # Build method-appropriate normalization specs
+  # n_rank and n_zscore don't accept l_u; only n_minmax uses it.
+  # Use l_u = c(1, 100) for minmax to avoid zeros (which break a_gmean).
+  sa_specs <- switch(sa_norm,
+    n_minmax = list(f_n = "n_minmax", f_n_para = list(l_u = c(1, 100))),
+    n_rank   = list(f_n = "n_rank"),
+    n_zscore = list(f_n = "n_zscore"),
+    list(f_n = sa_norm)
+  )
+
   sa_coin <- tryCatch({
     c_tmp <- Normalise(gcceii_coin, dset = sa_source,
-                       global_specs = list(f_n = sa_norm,
-                                           f_n_para = list(l_u = c(0, 100))),
-                       write_to = "Normalised", quiet = TRUE)
-    Aggregate(c_tmp, dset = "Normalised", f_ag = sa_agg, quiet = TRUE)
-  }, error = function(e) NULL)
+                       global_specs = sa_specs,
+                       write_to = "SA_Normalised")
+    Aggregate(c_tmp, dset = "SA_Normalised", f_ag = sa_agg)
+  }, error = function(e) {
+    sa_errors <<- c(sa_errors, paste0(sa_norm, "+", sa_agg, ": ", e$message))
+    NULL
+  })
 
   if (!is.null(sa_coin)) {
     sa_res <- get_results(sa_coin, dset = "Aggregated", tab_type = "Full")
@@ -323,6 +336,28 @@ for (sa_i in seq_len(sa_N)) {
 
 sa_all <- bind_rows(sa_results_list)
 sa_n_ok <- sum(!sapply(sa_results_list, is.null))
+
+# Report method breakdown
+if (sa_n_ok > 0) {
+  sa_method_counts <- sa_all %>%
+    distinct(iteration, norm, agg) %>%
+    count(norm, agg, name = "n_replications")
+  message(paste("\n  Method combinations that succeeded:"))
+  for (r in seq_len(nrow(sa_method_counts))) {
+    message(paste("   ", sa_method_counts$norm[r], "+",
+                  sa_method_counts$agg[r], ":",
+                  sa_method_counts$n_replications[r], "replications"))
+  }
+}
+
+# Report unique errors
+if (length(sa_errors) > 0) {
+  unique_errors <- unique(sa_errors)
+  message(paste("\n  Failed combinations (", length(sa_errors), "total ):"))
+  for (ue in unique_errors) {
+    message(paste("   ", ue))
+  }
+}
 
 # Rank statistics per unit
 sa_rank_summary <- sa_all %>%
@@ -341,7 +376,7 @@ sa_rank_summary <- sa_all %>%
   ) %>%
   arrange(mean_rank)
 
-message(paste("✓ Sensitivity analysis complete (", sa_n_ok, "/", sa_N,
+message(paste("\n✓ Sensitivity analysis complete (", sa_n_ok, "/", sa_N,
               "replications succeeded )"))
 message("\nRank stability across normalization/aggregation choices:")
 print(as.data.frame(sa_rank_summary))
