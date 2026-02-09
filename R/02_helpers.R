@@ -887,6 +887,227 @@ get_imputation_summary <- function(coin) {
 }
 
 # =============================================================================
+# PCA WEIGHT ESTIMATION
+# =============================================================================
+
+#' Estimate PCA-based Indicator Weights
+#'
+#' Derives data-driven weights using Principal Component Analysis on the
+#' normalised indicator data (pooled across all years). Two approaches:
+#'
+#' **Approach 1 - Per-dimension:** Runs PCA within each dimension separately.
+#' Uses squared PC1 loadings (normalised to sum to 1) as indicator weights.
+#' This captures how much each indicator contributes to the dominant factor
+#' of variation within its dimension.
+#'
+#' **Approach 2 - Whole-index:** Runs PCA on all indicators simultaneously.
+#' Retains enough components to explain at least \code{var_threshold} of total
+#' variance (default 80%). Weights are the sum of squared loadings across
+#' retained components, weighted by each component's eigenvalue share.
+#' Dimension-level weights are then derived by summing their indicators'
+#' weights.
+#'
+#' @param coin COINr coin object (after normalisation)
+#' @param dset Dataset to use (default: "Normalised")
+#' @param var_threshold Minimum cumulative variance for whole-index approach
+#'   (default: 0.80)
+#' @return List with:
+#'   \item{by_dimension}{Tibble: iCode, Parent, equal_weight, pca_dim_weight}
+#'   \item{whole_index}{Tibble: iCode, Parent, equal_weight, pca_whole_weight}
+#'   \item{dimension_weights}{Tibble: dimension, equal_weight, pca_whole_weight}
+#'   \item{pca_dim_details}{List of per-dimension PCA summaries}
+#'   \item{pca_whole_details}{List with n_components, var_explained, loadings}
+#' @export
+estimate_pca_weights <- function(coin, dset = "Normalised", var_threshold = 0.80) {
+
+  message("\n=======================================================")
+  message("  PCA WEIGHT ESTIMATION")
+  message("=======================================================\n")
+
+  norm_data <- coin$Data[[dset]]
+  if (is.null(norm_data)) {
+    stop(paste("Dataset", dset, "not found in coin. Run normalisation first."))
+  }
+
+  # Get indicator metadata from the coin
+  iMeta <- coin$Meta$Ind
+  indicators <- iMeta %>% filter(Type == "Indicator")
+  dimensions <- iMeta %>% filter(Type == "Aggregate", Level == 2)
+
+  # =========================================================================
+  # APPROACH 1: PER-DIMENSION PCA
+  # =========================================================================
+  message("Approach 1: Per-dimension PCA (PC1 loadings)")
+
+  dim_results <- list()
+  dim_details <- list()
+
+  for (dim_code in dimensions$iCode) {
+    dim_inds <- indicators %>% filter(Parent == dim_code) %>% pull(iCode)
+
+    # Need at least 2 indicators for PCA
+    available <- intersect(dim_inds, names(norm_data))
+    if (length(available) < 2) {
+      message(paste("  ", dim_code, "- skipped (< 2 indicators available)"))
+      next
+    }
+
+    dim_data <- norm_data %>%
+      select(all_of(available)) %>%
+      drop_na()
+
+    if (nrow(dim_data) < 3) {
+      message(paste("  ", dim_code, "- skipped (< 3 complete observations)"))
+      next
+    }
+
+    pca <- prcomp(dim_data, scale. = FALSE)
+    pc1_var <- pca$sdev[1]^2 / sum(pca$sdev^2)
+    loadings_pc1 <- pca$rotation[, 1]
+
+    # Squared loadings normalised to sum to 1
+    weights <- loadings_pc1^2 / sum(loadings_pc1^2)
+
+    dim_results[[dim_code]] <- tibble(
+      iCode = names(weights),
+      Parent = dim_code,
+      pca_dim_weight = as.numeric(weights)
+    )
+
+    dim_details[[dim_code]] <- list(
+      n_indicators = length(available),
+      n_obs = nrow(dim_data),
+      pc1_var_explained = pc1_var,
+      pc1_loadings = loadings_pc1
+    )
+
+    message(sprintf("  %-16s  %d indicators  PC1 explains %.1f%% of variance",
+                    dim_code, length(available), pc1_var * 100))
+  }
+
+  by_dimension <- bind_rows(dim_results) %>%
+    left_join(
+      indicators %>% select(iCode, Parent) %>%
+        mutate(n_in_dim = ave(seq_len(n()), Parent, FUN = length)),
+      by = c("iCode", "Parent")
+    ) %>%
+    mutate(equal_weight = 1 / n_in_dim) %>%
+    select(iCode, Parent, equal_weight, pca_dim_weight) %>%
+    arrange(Parent, desc(pca_dim_weight))
+
+  # =========================================================================
+  # APPROACH 2: WHOLE-INDEX PCA
+  # =========================================================================
+  message(paste0("\nApproach 2: Whole-index PCA (>=", var_threshold * 100,
+                 "% variance threshold)"))
+
+  all_inds <- intersect(indicators$iCode, names(norm_data))
+  all_data <- norm_data %>%
+    select(all_of(all_inds)) %>%
+    drop_na()
+
+  message(paste("  Using", length(all_inds), "indicators,",
+                nrow(all_data), "complete observations"))
+
+  pca_all <- prcomp(all_data, scale. = FALSE)
+
+  # Variance explained per component
+  eigenvalues <- pca_all$sdev^2
+  prop_var <- eigenvalues / sum(eigenvalues)
+  cum_var <- cumsum(prop_var)
+
+  # Retain components to reach threshold
+  n_comp <- which(cum_var >= var_threshold)[1]
+  if (is.na(n_comp)) n_comp <- length(cum_var)
+
+  message(sprintf("  Retaining %d components (%.1f%% of variance)",
+                  n_comp, cum_var[n_comp] * 100))
+
+  # Display variance breakdown for retained components
+  for (k in seq_len(n_comp)) {
+    message(sprintf("    PC%d: %.1f%% (cumulative: %.1f%%)",
+                    k, prop_var[k] * 100, cum_var[k] * 100))
+  }
+
+  # Weights: sum of (squared loading × proportion of variance) across retained PCs
+  retained_loadings <- pca_all$rotation[, 1:n_comp, drop = FALSE]
+  prop_retained <- prop_var[1:n_comp]
+
+  # Each indicator's weight = sum over retained PCs of (loading^2 × eigenvalue_share)
+  raw_weights <- (retained_loadings^2) %*% prop_retained
+  whole_weights <- as.numeric(raw_weights / sum(raw_weights))
+  names(whole_weights) <- rownames(raw_weights)
+
+  whole_index <- tibble(
+    iCode = names(whole_weights),
+    pca_whole_weight = whole_weights
+  ) %>%
+    left_join(indicators %>% select(iCode, Parent), by = "iCode") %>%
+    left_join(
+      indicators %>% count(Parent, name = "n_in_dim") %>%
+        rename(parent_tmp = Parent),
+      by = c("Parent" = "parent_tmp")
+    ) %>%
+    mutate(equal_weight = 1 / n_in_dim) %>%
+    select(iCode, Parent, equal_weight, pca_whole_weight) %>%
+    arrange(Parent, desc(pca_whole_weight))
+
+  # Derive dimension-level weights from indicator weights
+  dim_equal <- dimensions %>%
+    select(iCode, Weight) %>%
+    rename(dimension = iCode, equal_weight = Weight)
+
+  dim_pca <- whole_index %>%
+    group_by(Parent) %>%
+    summarize(pca_whole_weight = sum(pca_whole_weight), .groups = "drop") %>%
+    rename(dimension = Parent)
+
+  dimension_weights <- dim_equal %>%
+    left_join(dim_pca, by = "dimension") %>%
+    arrange(desc(pca_whole_weight))
+
+  # =========================================================================
+  # SUMMARY
+  # =========================================================================
+  message("\n--- Dimension weights comparison ---")
+  for (i in seq_len(nrow(dimension_weights))) {
+    r <- dimension_weights[i, ]
+    message(sprintf("  %-16s  Expert: %4.1f%%   PCA: %4.1f%%",
+                    r$dimension, r$equal_weight * 100, r$pca_whole_weight * 100))
+  }
+
+  message("\n--- Largest indicator weight differences (per-dimension PCA) ---")
+  top_diffs <- by_dimension %>%
+    mutate(diff = pca_dim_weight - equal_weight) %>%
+    arrange(desc(abs(diff))) %>%
+    head(8)
+  for (i in seq_len(nrow(top_diffs))) {
+    r <- top_diffs[i, ]
+    direction <- if (r$diff > 0) "+" else ""
+    message(sprintf("  %-24s %-14s  Equal: %.2f  PCA: %.2f  (%s%.2f)",
+                    r$iCode, r$Parent, r$equal_weight, r$pca_dim_weight,
+                    direction, r$diff))
+  }
+
+  pca_whole_details <- list(
+    n_components = n_comp,
+    var_explained = cum_var[n_comp],
+    prop_var_per_pc = prop_var[1:n_comp],
+    loadings = retained_loadings
+  )
+
+  message("\n=======================================================\n")
+
+  return(list(
+    by_dimension = by_dimension,
+    whole_index = whole_index,
+    dimension_weights = dimension_weights,
+    pca_dim_details = dim_details,
+    pca_whole_details = pca_whole_details
+  ))
+}
+
+# =============================================================================
 # MODULE LOAD MESSAGE
 # =============================================================================
 
@@ -927,6 +1148,9 @@ Validation:
 Aggregation:
   - gdp_weighted_mean()      : GDP-weighted average
   - population_weighted_mean(): Population-weighted average
+
+PCA Weights:
+  - estimate_pca_weights()   : Data-driven weight estimation
 
 =======================================================
 ")

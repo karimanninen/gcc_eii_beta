@@ -274,6 +274,27 @@ ggsave("output/gcceii_trend.png", trend_plot, width = 10, height = 6, dpi = 150)
 message("✓ Trend plot saved to output/gcceii_trend.png\n")
 
 # =============================================================================
+# STEP 10a: PCA WEIGHT ESTIMATION
+# =============================================================================
+# Estimate data-driven indicator weights using PCA on the Normalised dataset.
+# Two approaches:
+#   1. Per-dimension PCA: PC1 squared loadings within each dimension
+#   2. Whole-index PCA: Retain components for >=80% variance, derive weights
+# Results are informational - compare against equal/expert weights.
+# =============================================================================
+
+message("Step 10a: Estimating PCA-based indicator weights...")
+
+pca_weights <- estimate_pca_weights(gcceii_coin, dset = "Normalised", var_threshold = 0.80)
+
+# Export PCA weight comparison tables
+write_csv(pca_weights$by_dimension, "output/gcceii_pca_weights_by_dimension.csv")
+write_csv(pca_weights$whole_index, "output/gcceii_pca_weights_whole_index.csv")
+write_csv(pca_weights$dimension_weights, "output/gcceii_pca_dimension_weights.csv")
+
+message("✓ PCA weights exported to output/\n")
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 
@@ -291,6 +312,9 @@ message("  - output/gcceii_results_all_years.csv")
 message(paste0("  - output/gcceii_results_", latest_year, ".csv"))
 message("  - output/gcceii_trend.png")
 message("  - output/gcceii_coin_workspace.RData")
+message("  - output/gcceii_pca_weights_by_dimension.csv")
+message("  - output/gcceii_pca_weights_whole_index.csv")
+message("  - output/gcceii_pca_dimension_weights.csv")
 message("=======================================================")
 
 # =============================================================================
