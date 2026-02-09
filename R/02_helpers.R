@@ -435,21 +435,19 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
   }
 
   # --- Sheet 5: Results Summary ---
+  # results already has Country and Year columns (including GCC aggregate)
   sheet_results <- results %>%
-    mutate(
-      Country = str_remove(uCode, "_\\d{4}$"),
-      Year = as.integer(str_extract(uCode, "\\d{4}$"))
-    ) %>%
     select(Country, Year, Trade, Financial, Labor,
            Infrastructure, Sustainability, Convergence, Index) %>%
     arrange(Country, Year)
 
-  # --- Sheet 6: Rankings ---
+  # --- Sheet 6: Rankings (exclude GCC aggregate - rankings are for countries) ---
   dim_cols <- c("Trade", "Financial", "Labor", "Infrastructure",
                 "Sustainability", "Convergence", "Index")
   years <- sort(unique(sheet_results$Year))
 
   sheet_rankings <- sheet_results %>%
+    filter(Country != "GCC") %>%
     select(Country, Year, Index) %>%
     pivot_wider(names_from = Year, values_from = Index,
                 names_prefix = "Index_") %>%
