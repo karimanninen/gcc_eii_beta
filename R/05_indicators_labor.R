@@ -125,12 +125,13 @@ calc_labor_mobility_raw <- function(common_market, population_data, year_filter)
 #' Student Mobility - GCC Students Hosted (Raw)
 #'
 #' Total GCC students in general education hosted by each country
-#' per 1000 host-country population. Uses aggregate totals per host
-#' country (Citizen=Total, Sex=Total).
+#' per 1000 host-country population. Uses nationality-level breakdowns
+#' (citizen_code != KN_TTL) summed per host country, which avoids the
+#' UAE data quality issue where the KN_TTL row reports total enrollment
+#' instead of GCC students.
 #'
-#' Note: UAE's KN_A9 Total row reports total enrollment (millions)
-#' rather than GCC students. A sanity check against the GCC-wide
-#' total excludes implausible values.
+#' Nationality-level data is available for 2016-2021. Years 2015 and
+#' 2022-2023 are linearly extrapolated from the nearest two data years.
 #'
 #' @param common_market Common Market dataset
 #' @param population_data Population dataset
@@ -144,47 +145,60 @@ calc_student_mobility_raw <- function(common_market, population_data, year_filte
 
   gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
 
-  # Host-country approach: total GCC students hosted by each country
-  # Filter sex_code == "KN_T" (Total) to avoid double-counting Male/Female
-  gcc_students <- common_market %>%
-    filter(
-      indicator_code == "KN_A9",
-      citizen_code == "KN_TTL",
-      sex_code == "KN_T",
-      host_country %in% gcc_countries,
-      year == year_filter
-    ) %>%
-    group_by(host_country) %>%
-    summarize(gcc_students_count = sum(value, na.rm = TRUE), .groups = "drop") %>%
-    rename(country = host_country)
+  # Years with nationality-level data
+  data_years <- 2016:2021
+
+  if (year_filter %in% data_years) {
+    # --- Direct calculation from nationality breakdowns ---
+    gcc_students <- common_market %>%
+      filter(
+        indicator_code == "KN_A9",
+        citizen_code != "KN_TTL",
+        sex_code == "KN_T",
+        host_country %in% gcc_countries,
+        year == year_filter
+      ) %>%
+      group_by(host_country) %>%
+      summarize(gcc_students_count = sum(value, na.rm = TRUE), .groups = "drop") %>%
+      rename(country = host_country)
+
+  } else {
+    # --- Extrapolate from nearest two data years ---
+    if (year_filter < min(data_years)) {
+      y1 <- min(data_years)
+      y2 <- y1 + 1
+    } else {
+      y2 <- max(data_years)
+      y1 <- y2 - 1
+    }
+
+    counts_y1 <- common_market %>%
+      filter(indicator_code == "KN_A9", citizen_code != "KN_TTL",
+             sex_code == "KN_T", host_country %in% gcc_countries, year == y1) %>%
+      group_by(host_country) %>%
+      summarize(count_y1 = sum(value, na.rm = TRUE), .groups = "drop")
+
+    counts_y2 <- common_market %>%
+      filter(indicator_code == "KN_A9", citizen_code != "KN_TTL",
+             sex_code == "KN_T", host_country %in% gcc_countries, year == y2) %>%
+      group_by(host_country) %>%
+      summarize(count_y2 = sum(value, na.rm = TRUE), .groups = "drop")
+
+    gcc_students <- counts_y1 %>%
+      left_join(counts_y2, by = "host_country") %>%
+      mutate(
+        annual_change = count_y2 - count_y1,
+        gcc_students_count = pmax(0, count_y1 + annual_change * (year_filter - y1))
+      ) %>%
+      select(country = host_country, gcc_students_count)
+
+    message(paste0("  ind_71_student ", year_filter,
+                   ": extrapolated from ", y1, "-", y2))
+  }
 
   # Return NA if no data
   if (nrow(gcc_students) == 0) {
     return(tibble(uName = gcc_countries, ind_71_student = NA_real_))
-  }
-
-  # Sanity check: get GCC-wide total to catch countries reporting
-  # total enrollment instead of GCC students (known issue with UAE)
-  gcc_total <- common_market %>%
-    filter(
-      indicator_code == "KN_A9",
-      citizen_code == "KN_TTL",
-      sex_code == "KN_T",
-      country_code == "KN_TTL",
-      year == year_filter
-    ) %>%
-    pull(value) %>%
-    sum(na.rm = TRUE)
-
-  if (gcc_total > 0) {
-    implausible <- gcc_students$gcc_students_count > gcc_total
-    if (any(implausible)) {
-      bad_countries <- gcc_students$country[implausible]
-      warning(paste0("ind_71_student ", year_filter,
-                     ": excluding ", paste(bad_countries, collapse = ", "),
-                     " (host count exceeds GCC total of ", gcc_total, ")"))
-      gcc_students$gcc_students_count[implausible] <- NA_real_
-    }
   }
 
   # Get population
