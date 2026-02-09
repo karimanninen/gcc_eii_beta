@@ -63,7 +63,7 @@ gcc_eii_beta/
 
 **Legend:** ✅ Complete | 🔲 To be created | ⚠️ Needs revision
 
-**Completion Status:** 94.7% (90/95 functions implemented)
+**Completion Status:** ~95% (28 indicators operational, 4 infrastructure placeholders remaining)
 
 ---
 
@@ -108,17 +108,16 @@ gcc_iso3 <- c("ARE", "BHR", "SAU", "OMN", "QAT", "KWT")
 |-----------|--------|------|-----------|
 | Trade Integration | 20% | `Trade` | Intra-GCC trade, non-oil diversification |
 | Financial Integration | 20% | `Financial` | OCA criteria, banking, capital markets |
-| Labor & Mobility | 15% | `Labor` | Worker mobility, students, tourism |
+| Labor & Mobility | 20% | `Labor` | Worker mobility, students, tourism |
 | Infrastructure | 20% | `Infrastructure` | Aviation, energy, digital connectivity |
 | Sustainability | 10% | `Sustainability` | Non-oil GDP, manufacturing, diversification |
-| Convergence | 15% | `Convergence` | Cross-country CV for key variables |
+| Convergence | 10% | `Convergence` | Cross-country CV for key variables |
 
 ### Hierarchy Structure
 ```
-Level 4: Index (GCCEII)
-    └── Level 3: Dimensions (Trade, Financial, Labor, Infrastructure, Sustainability, Convergence)
-        └── Level 2: Categories (sub-groupings within dimensions)
-            └── Level 1: Indicators (~40 current, expanding to 90)
+Level 3: Index (GCCEII)
+    └── Level 2: Dimensions (Trade, Financial, Labor, Infrastructure, Sustainability, Convergence)
+        └── Level 1: Indicators (28 current, expanding to 90)
 ```
 
 ### Special Indicator Types
@@ -140,42 +139,48 @@ Level 4: Index (GCCEII)
 
 ## COINr Workflow
 
-### Target Pipeline
+### Actual Pipeline (build_gcceii_coin.R)
 ```r
-# 1. Load raw data
+# Step 0: Source all modules (R/01-10)
+# Step 1: Load raw data
 data_list <- load_gcc_data(data_dir = "data-raw")
 
-# 2. Extract raw indicators (NOT normalized)
-iData <- extract_all_indicators(data_list, year = 2023)
+# Step 2: Extract raw indicators for all years (2015-2023 pooled panel)
+iData_panel <- map(years, ~extract_raw_indicators(data_list, .x)) %>% bind_rows()
 
-# 3. Build metadata
-iMeta <- build_iMeta(framework_file = "data-raw/framework.xlsx")
+# Step 3: Build metadata
+iMeta <- build_iMeta(version = "poc")
 
-# 4. Construct coin
-coin <- new_coin(iData, iMeta, 
-                 level_names = c("Indicator", "Category", "Dimension", "Index"))
+# Step 4: Prepare data with unique uCodes (e.g. "BHR_2023")
+# Step 5: Construct coin
+coin <- new_coin(iData, iMeta, level_names = c("Indicator", "Dimension", "Index"))
 
-# 5. Treat outliers (IMPORTANT - before normalization)
-coin <- Treat(coin, dset = "Raw", 
-              global_specs = list(f1 = "winsorise", f1_para = list(winmax = 2)))
+# Step 5a: Pre-impute specific indicators (e.g. ind_71_student extrapolation)
+coin <- pre_impute_student_mobility(coin)
 
-# 6. Normalize
-coin <- Normalise(coin, dset = "Treated",
-                  global_specs = list(f_n = "n_minmax", f_n_para = list(l_u = c(0, 100))))
+# Step 5b: Impute missing data (linear interpolation + EM)
+coin <- impute_gcceii(coin)
 
-# 7. Aggregate
+# Step 6: Normalize (custom multi-strategy pipeline)
+#   - Winsorize 9 indicators at 5th/95th percentile
+#   - Z-score for OCA criteria (ind_gdp_growth, ind_inflation, ind_m2_growth)
+#   - Goalpost for meaningful percentages (ind_44_stock)
+#   - Bounded min-max for structurally constrained indicators (ind_39_banking)
+#   - Min-max 0-100 for all others (pooled across years)
+#   - Rescale z-scores to 0-100
+coin <- run_normalization_pipeline(coin)
+
+# Step 7: Aggregate (arithmetic weighted mean)
 coin <- Aggregate(coin, dset = "Normalised", f_ag = "a_amean")
 
-# 8. Get results
-results <- get_results(coin, dset = "Aggregated", tab_type = "Full")
-```
+# Step 8: Extract results with within-year rankings + GCC weighted aggregate
+results <- get_results(coin, ...) %>% append_gcc_aggregate()
 
-### Data Treatment Guidance
-These indicators likely need outlier treatment (UAE/Saudi dominance):
-- FDI flows → Winsorise (max 1-2 points)
-- Stock market capitalisation → Log transform
-- Air passenger traffic → Log transform
-- Remittance outflows → Winsorise
+# Step 9: Export CSV, XLSX, workspace
+# Step 10: Visualizations
+# Step 10a: PCA weight estimation + comparison table
+# Sensitivity analysis: normalization × aggregation × weighting
+```
 
 ---
 
@@ -274,9 +279,20 @@ tibble(
 
 ### Completed ✅
 - All indicator modules (01-05, 07-10) fully implemented
-- COINr workflow with pooled normalization
-- Sensitivity analysis (enabled in build script)
-- Panel data handling (2015-2023)
+- COINr workflow with pooled normalization (2015-2023 panel)
+- Custom normalization pipeline (winsorize, z-score, goalpost, bounded min-max)
+- Two-pass imputation (linear interpolation + EM)
+- Pre-imputation for ind_71_student (linear extrapolation outside 2016-2021)
+- Fixed ind_44_stock data filter bug and goalpost normalization
+- Fixed ind_39_banking double-counting and bounded min-max [50,100]
+- Fixed ind_71_student UAE data (nationality breakdowns instead of KN_TTL)
+- GCC GDP-weighted aggregate index for all outputs
+- Within-year country rankings (1-6 per year)
+- PCA weight estimation (per-dimension + whole-index)
+- PCA-weighted aggregate comparison table
+- Sensitivity analysis: normalization × aggregation (country-level)
+- Extended sensitivity analysis: normalization × aggregation × weighting (GCC aggregate)
+- Full methodology XLSX export
 
 ---
 
@@ -393,4 +409,4 @@ These are documented in the code and should be replaced with real data sources.
 
 ---
 
-*Last updated: February 2025*
+*Last updated: February 2026*

@@ -561,12 +561,16 @@ sa_weight_schemes <- list(
   )
 )
 
+# Extended SA uses only bounded normalization methods (z-score excluded -
+# its unbounded scale is not comparable for GCC aggregate level analysis)
+sa_ext_norm_methods <- c("n_minmax", "n_rank")
+
 sa_ext_N <- 150
 sa_ext_results <- vector("list", sa_ext_N)
 sa_ext_errors <- character(0)
 
 for (sa_i in seq_len(sa_ext_N)) {
-  sa_norm   <- sample(sa_norm_methods, 1)
+  sa_norm   <- sample(sa_ext_norm_methods, 1)
   sa_agg    <- sample(sa_agg_methods, 1)
   sa_wt_name <- sample(names(sa_weight_schemes), 1)
   sa_wt <- sa_weight_schemes[[sa_wt_name]]
