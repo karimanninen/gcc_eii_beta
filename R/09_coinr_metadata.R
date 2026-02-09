@@ -107,10 +107,10 @@ build_iMeta <- function(version = "poc") {
     ~iCode, ~iName, ~Parent, ~Weight, ~Direction, ~Level, ~Type,
     "Trade", "Trade Integration", "Index", 0.20, 1, 2, "Aggregate",
     "Financial", "Financial Integration", "Index", 0.20, 1, 2, "Aggregate",
-    "Labor", "Labor & Mobility", "Index", 0.15, 1, 2, "Aggregate",
+    "Labor", "Labor & Mobility", "Index", 0.20, 1, 2, "Aggregate",
     "Infrastructure", "Infrastructure", "Index", 0.20, 1, 2, "Aggregate",
     "Sustainability", "Sustainability", "Index", 0.10, 1, 2, "Aggregate",
-    "Convergence", "Convergence", "Index", 0.15, 1, 2, "Aggregate"
+    "Convergence", "Convergence", "Index", 0.10, 1, 2, "Aggregate"
   )
   
   

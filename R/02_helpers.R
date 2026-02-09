@@ -1108,6 +1108,56 @@ estimate_pca_weights <- function(coin, dset = "Normalised", var_threshold = 0.80
 }
 
 # =============================================================================
+# GCC WEIGHTED AVERAGE
+# =============================================================================
+
+#' Append GDP-Weighted GCC Aggregate to Results
+#'
+#' Computes a GDP-weighted average across the 6 GCC countries for each year
+#' and appends it as a "GCC" row. Works on any results table that has
+#' Country, Year, and numeric score columns (dimensions + Index).
+#'
+#' @param results Tibble with Country, Year, and numeric score columns
+#' @param score_cols Character vector of column names to aggregate.
+#'   Defaults to the 6 dimensions + Index.
+#' @param gdp_weights Named numeric vector (Country code -> weight).
+#'   Defaults to the weights from build_uMeta().
+#' @return The input tibble with GCC rows appended
+#' @export
+append_gcc_aggregate <- function(results,
+                                 score_cols = c("Trade", "Financial", "Labor",
+                                                "Infrastructure", "Sustainability",
+                                                "Convergence", "Index"),
+                                 gdp_weights = c(BHR = 0.02, KWT = 0.08, OMN = 0.05,
+                                                  QAT = 0.11, SAU = 0.55, ARE = 0.19)) {
+
+  # Only aggregate columns that exist in the data
+  score_cols <- intersect(score_cols, names(results))
+
+  gcc_agg <- results %>%
+    filter(Country %in% names(gdp_weights)) %>%
+    mutate(w = gdp_weights[Country]) %>%
+    group_by(Year) %>%
+    summarize(
+      across(all_of(score_cols), ~ weighted.mean(.x, w, na.rm = TRUE)),
+      .groups = "drop"
+    ) %>%
+    mutate(Country = "GCC")
+
+  # Carry over any other columns as NA
+  missing_cols <- setdiff(names(results), names(gcc_agg))
+  for (mc in missing_cols) {
+    gcc_agg[[mc]] <- NA
+  }
+
+  # Reorder columns to match input, then bind
+  gcc_agg <- gcc_agg %>% select(all_of(names(results)))
+
+  bind_rows(results, gcc_agg) %>%
+    arrange(Year, desc(Country == "GCC"))
+}
+
+# =============================================================================
 # MODULE LOAD MESSAGE
 # =============================================================================
 
@@ -1151,6 +1201,9 @@ Aggregation:
 
 PCA Weights:
   - estimate_pca_weights()   : Data-driven weight estimation
+
+GCC Aggregate:
+  - append_gcc_aggregate()   : GDP-weighted GCC average
 
 =======================================================
 ")

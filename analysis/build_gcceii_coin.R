@@ -187,14 +187,17 @@ results <- get_results(gcceii_coin, dset = "Aggregated", tab_type = "Full") %>%
   ) %>%
   arrange(Year, desc(Index))
 
+# Append GDP-weighted GCC aggregate
+results <- append_gcc_aggregate(results)
+
 # Latest year summary
 latest_year <- max(results$Year)
 
 latest_results <- results %>%
   filter(Year == latest_year) %>%
-  select(Country, Trade, Financial, Labor, 
+  select(Country, Trade, Financial, Labor,
          Infrastructure, Sustainability, Convergence, Index) %>%
-  arrange(desc(Index))
+  arrange(Country == "GCC", desc(Index))
 
 message("\n=======================================================")
 message(paste("  GCC EII RESULTS -", latest_year))
@@ -202,16 +205,13 @@ message("=======================================================\n")
 print(latest_results)
 
 
-# Time series summary
+# Time series summary (GCC weighted average)
 message("\n=======================================================")
-message("  GCC AVERAGE INDEX BY YEAR")
+message("  GCC WEIGHTED INDEX BY YEAR")
 message("=======================================================\n")
 gcc_trend <- results %>%
-  group_by(Year) %>%
-  summarize(
-    GCC_Index = mean(Index, na.rm = TRUE),
-    .groups = "drop"
-  )
+  filter(Country == "GCC") %>%
+  select(Year, GCC_Index = Index)
 print(gcc_trend)
 
 # =============================================================================
@@ -320,6 +320,7 @@ reaggregate_with_weights <- function(coin, ind_weights, dim_weights) {
       Year = as.integer(str_extract(uCode, "\\d{4}$")),
       Country = str_remove(uCode, "_\\d{4}$")
     )
+  res <- append_gcc_aggregate(res)
   return(res)
 }
 
