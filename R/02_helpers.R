@@ -642,6 +642,7 @@ impute_gcceii <- function(coin) {
           amelia_result$code == 1) {
         em_output <- as_tibble(amelia_result$imputations[[1]])
         n_em <- 0
+        n_clamped <- 0
 
         for (ind in em_eligible) {
           was_na <- is.na(imputed_df[[ind]])
@@ -649,7 +650,18 @@ impute_gcceii <- function(coin) {
           em_filled <- was_na & now_filled
 
           if (any(em_filled)) {
-            imputed_df[[ind]][em_filled] <- em_output[[ind]][em_filled]
+            em_vals <- em_output[[ind]][em_filled]
+
+            # Clamp negative values: all GCCEII indicators are non-negative
+            # (ratios, shares, rates per 1000). EM can produce negatives
+            # because it assumes multivariate normal.
+            neg_mask <- em_vals < 0
+            if (any(neg_mask)) {
+              n_clamped <- n_clamped + sum(neg_mask)
+              em_vals[neg_mask] <- 0
+            }
+
+            imputed_df[[ind]][em_filled] <- em_vals
 
             for (ii in which(em_filled)) {
               n_em <- n_em + 1
@@ -657,13 +669,16 @@ impute_gcceii <- function(coin) {
                 uCode = uCodes[ii],
                 indicator = ind,
                 method = "EM",
-                imputed_value = em_output[[ind]][ii]
+                imputed_value = imputed_df[[ind]][ii]
               )
             }
           }
         }
 
         message(paste("  Imputed", n_em, "values via EM algorithm"))
+        if (n_clamped > 0) {
+          message(paste("  Clamped", n_clamped, "negative EM values to 0"))
+        }
         em_success <- TRUE
       } else {
         if (!is.null(amelia_result) && !is.null(amelia_result$code)) {
