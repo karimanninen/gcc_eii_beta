@@ -40,7 +40,7 @@ gcc_eii_beta/
 
 Legend: ✅ Complete | ⚠️ Partial | 🔲 To be created
 
-**Status:** 94.7% complete (90/95 functions implemented)
+**Status:** ~95% complete (28 indicators operational, 4 infrastructure placeholders)
 
 ------------------------------------------------------------------------
 
@@ -79,38 +79,41 @@ normalization.
 **Deliverables**:
 
 ``` r
-# iMeta structure (90 indicators + aggregates)
-iMeta <- tibble(
-  iCode = c("ind_51", "ind_52", ..., "Trade", "Financial", ..., "Index"),
-  iName = c("Trade Intensity", "Services Share", ...),
-  Level = c(1, 1, ..., 2, 2, ..., 4),
-  Parent = c("Trade", "Trade", ..., "Index", "Index", ..., NA),
-  Weight = c(1, 1, ..., 0.20, 0.20, ..., NA),
-  Direction = c(1, 1, ..., NA, NA, ..., NA),
-  Type = c("Indicator", "Indicator", ..., "Aggregate", "Aggregate", ..., "Aggregate")
-)
+# iMeta structure (28 indicators + 6 dimensions + index)
+iMeta <- build_iMeta(version = "poc")
+# 35 rows: Level 1 = 28 indicators, Level 2 = 6 dimensions, Level 3 = Index
 
-# Coin construction
-coin <- new_coin(iData, iMeta, level_names = c("Indicator", "Category", "Dimension", "Index"))
-coin <- Normalise(coin, dset = "Raw", global_specs = list(f_n = "n_minmax"))
+# Coin construction with pooled panel data (2015-2023)
+coin <- new_coin(iData, iMeta, level_names = c("Indicator", "Dimension", "Index"))
+
+# Custom normalization pipeline (winsorize → z-score/goalpost/minmax → rescale)
+coin <- run_normalization_pipeline(coin)
+
+# Aggregate and extract results with GCC weighted average
 coin <- Aggregate(coin, dset = "Normalised", f_ag = "a_amean")
+results <- get_results(coin, ...) %>% append_gcc_aggregate()
 ```
 
 ------------------------------------------------------------------------
 
-### Stage 3: Dashboard + Export (Outputs) 🔲 IN PROGRESS
+### Stage 3: Dashboard + Export (Outputs) ⚠️ IN PROGRESS
 
 **Goal**: Generate all outputs from the coin object
 
 **Completed**:
-- Sensitivity analysis (enabled in build script)
-- CSV export of results
-- PNG visualization export
+- CSV export of results (all years + latest year)
+- Full methodology XLSX export (9-sheet workbook)
+- PNG trend visualization
 - RData workspace export
+- GCC GDP-weighted aggregate index
+- Within-year country rankings
+- PCA weight estimation (per-dimension + whole-index)
+- PCA-weighted aggregate comparison table
+- Sensitivity analysis: normalization × aggregation (country-level)
+- Extended sensitivity analysis: normalization × aggregation × weighting (GCC aggregate)
 
 **Remaining**:
 - Shiny dashboard
-- Excel export with formatting
 - DESCRIPTION/NAMESPACE for package installation
 
 ------------------------------------------------------------------------

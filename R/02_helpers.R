@@ -435,21 +435,19 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
   }
 
   # --- Sheet 5: Results Summary ---
+  # results already has Country and Year columns (including GCC aggregate)
   sheet_results <- results %>%
-    mutate(
-      Country = str_remove(uCode, "_\\d{4}$"),
-      Year = as.integer(str_extract(uCode, "\\d{4}$"))
-    ) %>%
     select(Country, Year, Trade, Financial, Labor,
            Infrastructure, Sustainability, Convergence, Index) %>%
     arrange(Country, Year)
 
-  # --- Sheet 6: Rankings ---
+  # --- Sheet 6: Rankings (exclude GCC aggregate - rankings are for countries) ---
   dim_cols <- c("Trade", "Financial", "Labor", "Infrastructure",
                 "Sustainability", "Convergence", "Index")
   years <- sort(unique(sheet_results$Year))
 
   sheet_rankings <- sheet_results %>%
+    filter(Country != "GCC") %>%
     select(Country, Year, Index) %>%
     pivot_wider(names_from = Year, values_from = Index,
                 names_prefix = "Index_") %>%
@@ -517,6 +515,82 @@ export_methodology_xlsx <- function(coin, iMeta, results, gcc_trend,
 # =============================================================================
 # SECTION 8: IMPUTATION
 # =============================================================================
+
+#' Pre-impute Student Mobility via Linear Extrapolation
+#'
+#' Fills ind_71_student NAs for years outside the 2016-2021 data window
+#' using linear extrapolation from the two nearest observed years.
+#' This runs on the Raw dataset before general imputation so that
+#' Raw_Data stays clean (NAs for unobserved years) and the extrapolated
+#' values appear in the Imputed dataset.
+#'
+#' Extrapolation logic:
+#'   - 2015: slope from 2016-2017, projected back 1 year
+#'   - 2022: slope from 2020-2021, projected forward 1 year
+#'   - 2023: slope from 2020-2021, projected forward 2 years
+#'   - Values are floored at 0 (student counts cannot be negative)
+#'
+#' @param coin COINr coin object with Raw data
+#' @return Coin object with ind_71_student NAs filled in Raw
+#' @export
+pre_impute_student_mobility <- function(coin) {
+
+  ind <- "ind_71_student"
+  if (!ind %in% names(coin$Data$Raw)) {
+    message("  ind_71_student not found in Raw data, skipping pre-imputation")
+    return(coin)
+  }
+
+  message("Pre-imputing ind_71_student (linear extrapolation)...")
+
+  raw_df <- coin$Data$Raw
+  uCodes <- raw_df$uCode
+  panel_ids <- str_remove(uCodes, "_\\d{4}$")
+  time_ids  <- as.integer(str_extract(uCodes, "\\d{4}$"))
+
+  vals <- raw_df[[ind]]
+  n_filled <- 0
+
+  for (pid in unique(panel_ids)) {
+    idx <- which(panel_ids == pid)
+    times <- time_ids[idx]
+    v <- vals[idx]
+
+    non_na <- !is.na(v)
+    na_pos <- is.na(v)
+
+    if (sum(non_na) >= 2 && any(na_pos)) {
+      # Linear extrapolation using the two nearest boundary years
+      for (i in which(na_pos)) {
+        t_target <- times[i]
+        obs_times <- times[non_na]
+        obs_vals  <- v[non_na]
+
+        if (t_target < min(obs_times)) {
+          # Backward: use two earliest observed years
+          ord <- order(obs_times)
+          t1 <- obs_times[ord[1]]; t2 <- obs_times[ord[2]]
+          v1 <- obs_vals[ord[1]];  v2 <- obs_vals[ord[2]]
+        } else {
+          # Forward: use two latest observed years
+          ord <- order(obs_times, decreasing = TRUE)
+          t1 <- obs_times[ord[2]]; t2 <- obs_times[ord[1]]
+          v1 <- obs_vals[ord[2]];  v2 <- obs_vals[ord[1]]
+        }
+
+        slope <- (v2 - v1) / (t2 - t1)
+        extrap <- max(0, v1 + slope * (t_target - t1))
+        vals[idx[i]] <- extrap
+        n_filled <- n_filled + 1
+      }
+    }
+  }
+
+  coin$Data$Raw[[ind]] <- vals
+  message(paste("  Extrapolated", n_filled, "values for ind_71_student"))
+
+  return(coin)
+}
 
 #' Impute Missing Data in GCCEII Coin
 #'
@@ -624,16 +698,25 @@ impute_gcceii <- function(coin) {
       usable_cols <- names(remaining_na_per_col[remaining_na_per_col < n_rows])
       em_input <- as.data.frame(imputed_df[, usable_cols, drop = FALSE])
 
+      # empri: empirical prior (ridge regularization) — needed because
+      # the number of indicators can exceed what 54 observations support.
+      # Setting empri = 0.5 * nrow adds moderate regularization.
+      empri_val <- max(1, round(0.5 * nrow(em_input)))
+
       amelia_result <- tryCatch({
-        Amelia::amelia(em_input, m = 1, p2s = 0)
+        Amelia::amelia(em_input, m = 1, p2s = 0, empri = empri_val)
       }, error = function(e) {
         warning(paste("Amelia EM failed:", e$message, "- falling back to group median"))
         NULL
       })
 
-      if (!is.null(amelia_result)) {
+      # Check Amelia return code: $code == 1 means success
+      if (!is.null(amelia_result) &&
+          !is.null(amelia_result$code) &&
+          amelia_result$code == 1) {
         em_output <- as_tibble(amelia_result$imputations[[1]])
         n_em <- 0
+        n_clamped <- 0
 
         for (ind in em_eligible) {
           was_na <- is.na(imputed_df[[ind]])
@@ -641,7 +724,18 @@ impute_gcceii <- function(coin) {
           em_filled <- was_na & now_filled
 
           if (any(em_filled)) {
-            imputed_df[[ind]][em_filled] <- em_output[[ind]][em_filled]
+            em_vals <- em_output[[ind]][em_filled]
+
+            # Clamp negative values: all GCCEII indicators are non-negative
+            # (ratios, shares, rates per 1000). EM can produce negatives
+            # because it assumes multivariate normal.
+            neg_mask <- em_vals < 0
+            if (any(neg_mask)) {
+              n_clamped <- n_clamped + sum(neg_mask)
+              em_vals[neg_mask] <- 0
+            }
+
+            imputed_df[[ind]][em_filled] <- em_vals
 
             for (ii in which(em_filled)) {
               n_em <- n_em + 1
@@ -649,14 +743,22 @@ impute_gcceii <- function(coin) {
                 uCode = uCodes[ii],
                 indicator = ind,
                 method = "EM",
-                imputed_value = em_output[[ind]][ii]
+                imputed_value = imputed_df[[ind]][ii]
               )
             }
           }
         }
 
         message(paste("  Imputed", n_em, "values via EM algorithm"))
+        if (n_clamped > 0) {
+          message(paste("  Clamped", n_clamped, "negative EM values to 0"))
+        }
         em_success <- TRUE
+      } else {
+        if (!is.null(amelia_result) && !is.null(amelia_result$code)) {
+          message(paste("  Amelia returned error code", amelia_result$code,
+                        "- falling back to group median"))
+        }
       }
     } else {
       message("  Amelia package not installed — falling back to group median")
@@ -783,6 +885,280 @@ get_imputation_summary <- function(coin) {
 }
 
 # =============================================================================
+# PCA WEIGHT ESTIMATION
+# =============================================================================
+
+#' Estimate PCA-based Indicator Weights
+#'
+#' Derives data-driven weights using Principal Component Analysis on the
+#' normalised indicator data (pooled across all years). Two approaches:
+#'
+#' **Approach 1 - Per-dimension:** Runs PCA within each dimension separately.
+#' Uses squared PC1 loadings (normalised to sum to 1) as indicator weights.
+#' This captures how much each indicator contributes to the dominant factor
+#' of variation within its dimension.
+#'
+#' **Approach 2 - Whole-index:** Runs PCA on all indicators simultaneously.
+#' Retains enough components to explain at least \code{var_threshold} of total
+#' variance (default 80%). Weights are the sum of squared loadings across
+#' retained components, weighted by each component's eigenvalue share.
+#' Dimension-level weights are then derived by summing their indicators'
+#' weights.
+#'
+#' @param coin COINr coin object (after normalisation)
+#' @param dset Dataset to use (default: "Normalised")
+#' @param var_threshold Minimum cumulative variance for whole-index approach
+#'   (default: 0.80)
+#' @return List with:
+#'   \item{by_dimension}{Tibble: iCode, Parent, equal_weight, pca_dim_weight}
+#'   \item{whole_index}{Tibble: iCode, Parent, equal_weight, pca_whole_weight}
+#'   \item{dimension_weights}{Tibble: dimension, equal_weight, pca_whole_weight}
+#'   \item{pca_dim_details}{List of per-dimension PCA summaries}
+#'   \item{pca_whole_details}{List with n_components, var_explained, loadings}
+#' @export
+estimate_pca_weights <- function(coin, dset = "Normalised", var_threshold = 0.80) {
+
+  message("\n=======================================================")
+  message("  PCA WEIGHT ESTIMATION")
+  message("=======================================================\n")
+
+  norm_data <- coin$Data[[dset]]
+  if (is.null(norm_data)) {
+    stop(paste("Dataset", dset, "not found in coin. Run normalisation first."))
+  }
+
+  # Get indicator metadata from the coin
+  iMeta <- coin$Meta$Ind
+  indicators <- iMeta %>% filter(Type == "Indicator")
+  dimensions <- iMeta %>% filter(Type == "Aggregate", Level == 2)
+
+  # =========================================================================
+  # APPROACH 1: PER-DIMENSION PCA
+  # =========================================================================
+  message("Approach 1: Per-dimension PCA (PC1 loadings)")
+
+  dim_results <- list()
+  dim_details <- list()
+
+  for (dim_code in dimensions$iCode) {
+    dim_inds <- indicators %>% filter(Parent == dim_code) %>% pull(iCode)
+
+    # Need at least 2 indicators for PCA
+    available <- intersect(dim_inds, names(norm_data))
+    if (length(available) < 2) {
+      message(paste("  ", dim_code, "- skipped (< 2 indicators available)"))
+      next
+    }
+
+    dim_data <- norm_data %>%
+      select(all_of(available)) %>%
+      drop_na()
+
+    if (nrow(dim_data) < 3) {
+      message(paste("  ", dim_code, "- skipped (< 3 complete observations)"))
+      next
+    }
+
+    pca <- prcomp(dim_data, scale. = FALSE)
+    pc1_var <- pca$sdev[1]^2 / sum(pca$sdev^2)
+    loadings_pc1 <- pca$rotation[, 1]
+
+    # Squared loadings normalised to sum to 1
+    weights <- loadings_pc1^2 / sum(loadings_pc1^2)
+
+    dim_results[[dim_code]] <- tibble(
+      iCode = names(weights),
+      Parent = dim_code,
+      pca_dim_weight = as.numeric(weights)
+    )
+
+    dim_details[[dim_code]] <- list(
+      n_indicators = length(available),
+      n_obs = nrow(dim_data),
+      pc1_var_explained = pc1_var,
+      pc1_loadings = loadings_pc1
+    )
+
+    message(sprintf("  %-16s  %d indicators  PC1 explains %.1f%% of variance",
+                    dim_code, length(available), pc1_var * 100))
+  }
+
+  by_dimension <- bind_rows(dim_results) %>%
+    left_join(
+      indicators %>% select(iCode, Parent) %>%
+        mutate(n_in_dim = ave(seq_len(n()), Parent, FUN = length)),
+      by = c("iCode", "Parent")
+    ) %>%
+    mutate(equal_weight = 1 / n_in_dim) %>%
+    select(iCode, Parent, equal_weight, pca_dim_weight) %>%
+    arrange(Parent, desc(pca_dim_weight))
+
+  # =========================================================================
+  # APPROACH 2: WHOLE-INDEX PCA
+  # =========================================================================
+  message(paste0("\nApproach 2: Whole-index PCA (>=", var_threshold * 100,
+                 "% variance threshold)"))
+
+  all_inds <- intersect(indicators$iCode, names(norm_data))
+  all_data <- norm_data %>%
+    select(all_of(all_inds)) %>%
+    drop_na()
+
+  message(paste("  Using", length(all_inds), "indicators,",
+                nrow(all_data), "complete observations"))
+
+  pca_all <- prcomp(all_data, scale. = FALSE)
+
+  # Variance explained per component
+  eigenvalues <- pca_all$sdev^2
+  prop_var <- eigenvalues / sum(eigenvalues)
+  cum_var <- cumsum(prop_var)
+
+  # Retain components to reach threshold
+  n_comp <- which(cum_var >= var_threshold)[1]
+  if (is.na(n_comp)) n_comp <- length(cum_var)
+
+  message(sprintf("  Retaining %d components (%.1f%% of variance)",
+                  n_comp, cum_var[n_comp] * 100))
+
+  # Display variance breakdown for retained components
+  for (k in seq_len(n_comp)) {
+    message(sprintf("    PC%d: %.1f%% (cumulative: %.1f%%)",
+                    k, prop_var[k] * 100, cum_var[k] * 100))
+  }
+
+  # Weights: sum of (squared loading × proportion of variance) across retained PCs
+  retained_loadings <- pca_all$rotation[, 1:n_comp, drop = FALSE]
+  prop_retained <- prop_var[1:n_comp]
+
+  # Each indicator's weight = sum over retained PCs of (loading^2 × eigenvalue_share)
+  raw_weights <- (retained_loadings^2) %*% prop_retained
+  whole_weights <- as.numeric(raw_weights / sum(raw_weights))
+  names(whole_weights) <- rownames(raw_weights)
+
+  whole_index <- tibble(
+    iCode = names(whole_weights),
+    pca_whole_weight = whole_weights
+  ) %>%
+    left_join(indicators %>% select(iCode, Parent), by = "iCode") %>%
+    left_join(
+      indicators %>% count(Parent, name = "n_in_dim") %>%
+        rename(parent_tmp = Parent),
+      by = c("Parent" = "parent_tmp")
+    ) %>%
+    mutate(equal_weight = 1 / n_in_dim) %>%
+    select(iCode, Parent, equal_weight, pca_whole_weight) %>%
+    arrange(Parent, desc(pca_whole_weight))
+
+  # Derive dimension-level weights from indicator weights
+  dim_equal <- dimensions %>%
+    select(iCode, Weight) %>%
+    rename(dimension = iCode, equal_weight = Weight)
+
+  dim_pca <- whole_index %>%
+    group_by(Parent) %>%
+    summarize(pca_whole_weight = sum(pca_whole_weight), .groups = "drop") %>%
+    rename(dimension = Parent)
+
+  dimension_weights <- dim_equal %>%
+    left_join(dim_pca, by = "dimension") %>%
+    arrange(desc(pca_whole_weight))
+
+  # =========================================================================
+  # SUMMARY
+  # =========================================================================
+  message("\n--- Dimension weights comparison ---")
+  for (i in seq_len(nrow(dimension_weights))) {
+    r <- dimension_weights[i, ]
+    message(sprintf("  %-16s  Expert: %4.1f%%   PCA: %4.1f%%",
+                    r$dimension, r$equal_weight * 100, r$pca_whole_weight * 100))
+  }
+
+  message("\n--- Largest indicator weight differences (per-dimension PCA) ---")
+  top_diffs <- by_dimension %>%
+    mutate(diff = pca_dim_weight - equal_weight) %>%
+    arrange(desc(abs(diff))) %>%
+    head(8)
+  for (i in seq_len(nrow(top_diffs))) {
+    r <- top_diffs[i, ]
+    direction <- if (r$diff > 0) "+" else ""
+    message(sprintf("  %-24s %-14s  Equal: %.2f  PCA: %.2f  (%s%.2f)",
+                    r$iCode, r$Parent, r$equal_weight, r$pca_dim_weight,
+                    direction, r$diff))
+  }
+
+  pca_whole_details <- list(
+    n_components = n_comp,
+    var_explained = cum_var[n_comp],
+    prop_var_per_pc = prop_var[1:n_comp],
+    loadings = retained_loadings
+  )
+
+  message("\n=======================================================\n")
+
+  return(list(
+    by_dimension = by_dimension,
+    whole_index = whole_index,
+    dimension_weights = dimension_weights,
+    pca_dim_details = dim_details,
+    pca_whole_details = pca_whole_details
+  ))
+}
+
+# =============================================================================
+# GCC WEIGHTED AVERAGE
+# =============================================================================
+
+#' Append GDP-Weighted GCC Aggregate to Results
+#'
+#' Computes a GDP-weighted average across the 6 GCC countries for each year
+#' and appends it as a "GCC" row. Works on any results table that has
+#' Country, Year, and numeric score columns (dimensions + Index).
+#'
+#' @param results Tibble with Country, Year, and numeric score columns
+#' @param score_cols Character vector of column names to aggregate.
+#'   Defaults to the 6 dimensions + Index.
+#' @param gdp_weights Named numeric vector (Country code -> weight).
+#'   Defaults to the weights from build_uMeta().
+#' @return The input tibble with GCC rows appended
+#' @export
+append_gcc_aggregate <- function(results,
+                                 score_cols = c("Trade", "Financial", "Labor",
+                                                "Infrastructure", "Sustainability",
+                                                "Convergence", "Index"),
+                                 gdp_weights = c(BHR = 0.02, KWT = 0.08, OMN = 0.05,
+                                                  QAT = 0.11, SAU = 0.55, ARE = 0.19)) {
+
+  # Only aggregate columns that exist in the data
+  score_cols <- intersect(score_cols, names(results))
+
+  gcc_agg <- results %>%
+    filter(Country %in% names(gdp_weights)) %>%
+    mutate(w = gdp_weights[Country]) %>%
+    group_by(Year) %>%
+    summarize(
+      across(all_of(score_cols), ~ weighted.mean(.x, w, na.rm = TRUE)),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      Country = "GCC",
+      uCode = paste0("GCC_", Year)
+    )
+
+  # Carry over any other columns as NA
+  missing_cols <- setdiff(names(results), names(gcc_agg))
+  for (mc in missing_cols) {
+    gcc_agg[[mc]] <- NA
+  }
+
+  # Reorder columns to match input, then bind
+  gcc_agg <- gcc_agg %>% select(all_of(names(results)))
+
+  bind_rows(results, gcc_agg) %>%
+    arrange(Year, desc(Country == "GCC"))
+}
+
+# =============================================================================
 # MODULE LOAD MESSAGE
 # =============================================================================
 
@@ -823,6 +1199,12 @@ Validation:
 Aggregation:
   - gdp_weighted_mean()      : GDP-weighted average
   - population_weighted_mean(): Population-weighted average
+
+PCA Weights:
+  - estimate_pca_weights()   : Data-driven weight estimation
+
+GCC Aggregate:
+  - append_gcc_aggregate()   : GDP-weighted GCC average
 
 =======================================================
 ")
