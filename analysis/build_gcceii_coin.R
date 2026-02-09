@@ -292,7 +292,107 @@ write_csv(pca_weights$by_dimension, "output/gcceii_pca_weights_by_dimension.csv"
 write_csv(pca_weights$whole_index, "output/gcceii_pca_weights_whole_index.csv")
 write_csv(pca_weights$dimension_weights, "output/gcceii_pca_dimension_weights.csv")
 
-message("✓ PCA weights exported to output/\n")
+message("✓ PCA weights exported to output/")
+
+# --- Re-aggregate with PCA weights to build comparison table ---
+message("  Re-aggregating with PCA weights for comparison...")
+
+# Save original weights
+original_weights <- gcceii_coin$Meta$Ind %>%
+  select(iCode, Weight) %>%
+  deframe()
+
+# Helper: swap weights, re-aggregate, extract per-country-year Index + dimensions
+reaggregate_with_weights <- function(coin, ind_weights, dim_weights) {
+  # Set indicator-level weights
+  for (ind in names(ind_weights)) {
+    idx <- which(coin$Meta$Ind$iCode == ind)
+    if (length(idx) == 1) coin$Meta$Ind$Weight[idx] <- ind_weights[ind]
+  }
+  # Set dimension-level weights
+  for (dim_name in names(dim_weights)) {
+    idx <- which(coin$Meta$Ind$iCode == dim_name)
+    if (length(idx) == 1) coin$Meta$Ind$Weight[idx] <- dim_weights[dim_name]
+  }
+  coin <- Aggregate(coin, dset = "Normalised", f_ag = "a_amean")
+  res <- get_results(coin, dset = "Aggregated", tab_type = "Full") %>%
+    mutate(
+      Year = as.integer(str_extract(uCode, "\\d{4}$")),
+      Country = str_remove(uCode, "_\\d{4}$")
+    )
+  return(res)
+}
+
+# --- Approach 1: Per-dimension PCA weights (dimension weights unchanged) ---
+pca_dim_ind_weights <- pca_weights$by_dimension %>%
+  select(iCode, pca_dim_weight) %>%
+  deframe()
+
+# Keep original dimension weights
+orig_dim_weights <- gcceii_coin$Meta$Ind %>%
+  filter(Type == "Aggregate", Level == 2) %>%
+  select(iCode, Weight) %>%
+  deframe()
+
+res_pca_dim <- reaggregate_with_weights(gcceii_coin, pca_dim_ind_weights, orig_dim_weights)
+
+# --- Approach 2: Whole-index PCA weights (both indicator and dimension) ---
+pca_whole_ind_weights <- pca_weights$whole_index %>%
+  select(iCode, pca_whole_weight) %>%
+  deframe()
+
+pca_whole_dim_weights <- pca_weights$dimension_weights %>%
+  select(dimension, pca_whole_weight) %>%
+  deframe()
+
+res_pca_whole <- reaggregate_with_weights(gcceii_coin, pca_whole_ind_weights, pca_whole_dim_weights)
+
+# --- Restore original weights ---
+for (ic in names(original_weights)) {
+  idx <- which(gcceii_coin$Meta$Ind$iCode == ic)
+  if (length(idx) == 1) gcceii_coin$Meta$Ind$Weight[idx] <- original_weights[ic]
+}
+gcceii_coin <- Aggregate(gcceii_coin, dset = "Normalised", f_ag = "a_amean")
+
+# --- Build comparison table ---
+comparison <- results %>%
+  select(Country, Year,
+         Trade_orig = Trade, Financial_orig = Financial,
+         Labor_orig = Labor, Infrastructure_orig = Infrastructure,
+         Sustainability_orig = Sustainability, Convergence_orig = Convergence,
+         Index_orig = Index) %>%
+  left_join(
+    res_pca_dim %>% select(Country, Year, Index_pca_dim = Index,
+                           Trade_pca_dim = Trade, Financial_pca_dim = Financial,
+                           Labor_pca_dim = Labor, Infrastructure_pca_dim = Infrastructure,
+                           Sustainability_pca_dim = Sustainability, Convergence_pca_dim = Convergence),
+    by = c("Country", "Year")
+  ) %>%
+  left_join(
+    res_pca_whole %>% select(Country, Year, Index_pca_whole = Index,
+                             Trade_pca_whole = Trade, Financial_pca_whole = Financial,
+                             Labor_pca_whole = Labor, Infrastructure_pca_whole = Infrastructure,
+                             Sustainability_pca_whole = Sustainability, Convergence_pca_whole = Convergence),
+    by = c("Country", "Year")
+  ) %>%
+  arrange(Year, desc(Index_orig))
+
+write_csv(comparison, "output/gcceii_index_comparison.csv")
+
+# Print latest year summary
+message("\n--- Index comparison (", latest_year, ") ---")
+comp_latest <- comparison %>%
+  filter(Year == latest_year) %>%
+  select(Country, Index_orig, Index_pca_dim, Index_pca_whole) %>%
+  arrange(desc(Index_orig))
+
+for (i in seq_len(nrow(comp_latest))) {
+  r <- comp_latest[i, ]
+  message(sprintf("  %-8s  Original: %5.1f   PCA-dim: %5.1f   PCA-whole: %5.1f",
+                  r$Country, r$Index_orig, r$Index_pca_dim, r$Index_pca_whole))
+}
+
+message("\n✓ Comparison table exported to output/gcceii_index_comparison.csv\n")
 
 # =============================================================================
 # SUMMARY
@@ -315,6 +415,7 @@ message("  - output/gcceii_coin_workspace.RData")
 message("  - output/gcceii_pca_weights_by_dimension.csv")
 message("  - output/gcceii_pca_weights_whole_index.csv")
 message("  - output/gcceii_pca_dimension_weights.csv")
+message("  - output/gcceii_index_comparison.csv")
 message("=======================================================")
 
 # =============================================================================
