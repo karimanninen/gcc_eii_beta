@@ -417,6 +417,9 @@ message("  - output/gcceii_pca_weights_by_dimension.csv")
 message("  - output/gcceii_pca_weights_whole_index.csv")
 message("  - output/gcceii_pca_dimension_weights.csv")
 message("  - output/gcceii_index_comparison.csv")
+message("  - output/gcceii_sensitivity_ranks.csv")
+message("  - output/gcceii_sensitivity_gcc_detail.csv")
+message("  - output/gcceii_sensitivity_gcc_summary.csv")
 message("=======================================================")
 
 # =============================================================================
@@ -524,3 +527,184 @@ print(as.data.frame(sa_rank_summary))
 # Save SA results
 write_csv(sa_rank_summary, "output/gcceii_sensitivity_ranks.csv")
 message("  Saved to output/gcceii_sensitivity_ranks.csv")
+
+# =============================================================================
+# SENSITIVITY ANALYSIS EXTENSION: WEIGHTING × NORMALIZATION × AGGREGATION
+# =============================================================================
+# Extends the analysis above by adding 3 weighting schemes (original, PCA-dim,
+# PCA-whole) as a third dimension. Focuses on the GCC aggregate index to show
+# how the overall integration measure varies across all methodological choices.
+# =============================================================================
+
+message("\nRunning extended sensitivity analysis (with PCA weights)...")
+
+# Define the 3 weight schemes (using PCA weights computed in Step 10a)
+sa_weight_schemes <- list(
+  original = list(
+    ind = gcceii_coin$Meta$Ind %>%
+      filter(Type == "Indicator") %>% select(iCode, Weight) %>% deframe(),
+    dim = gcceii_coin$Meta$Ind %>%
+      filter(Type == "Aggregate", Level == 2) %>% select(iCode, Weight) %>% deframe()
+  ),
+  pca_dim = list(
+    ind = pca_weights$by_dimension %>% select(iCode, pca_dim_weight) %>% deframe(),
+    dim = orig_dim_weights
+  ),
+  pca_whole = list(
+    ind = pca_weights$whole_index %>% select(iCode, pca_whole_weight) %>% deframe(),
+    dim = pca_weights$dimension_weights %>% select(dimension, pca_whole_weight) %>% deframe()
+  )
+)
+
+sa_ext_N <- 150
+sa_ext_results <- vector("list", sa_ext_N)
+sa_ext_errors <- character(0)
+
+for (sa_i in seq_len(sa_ext_N)) {
+  sa_norm   <- sample(sa_norm_methods, 1)
+  sa_agg    <- sample(sa_agg_methods, 1)
+  sa_wt_name <- sample(names(sa_weight_schemes), 1)
+  sa_wt <- sa_weight_schemes[[sa_wt_name]]
+
+  sa_specs <- switch(sa_norm,
+    n_minmax = list(f_n = "n_minmax", f_n_para = list(l_u = c(1, 100))),
+    n_rank   = list(f_n = "n_rank"),
+    n_zscore = list(f_n = "n_zscore"),
+    list(f_n = sa_norm)
+  )
+
+  sa_res <- tryCatch({
+    # Temporarily set weights
+    sa_coin <- gcceii_coin
+    for (ind in names(sa_wt$ind)) {
+      idx <- which(sa_coin$Meta$Ind$iCode == ind)
+      if (length(idx) == 1) sa_coin$Meta$Ind$Weight[idx] <- sa_wt$ind[ind]
+    }
+    for (d in names(sa_wt$dim)) {
+      idx <- which(sa_coin$Meta$Ind$iCode == d)
+      if (length(idx) == 1) sa_coin$Meta$Ind$Weight[idx] <- sa_wt$dim[d]
+    }
+
+    sa_coin <- Normalise(sa_coin, dset = sa_source,
+                         global_specs = sa_specs,
+                         write_to = "SA_Normalised")
+    sa_coin <- Aggregate(sa_coin, dset = "SA_Normalised", f_ag = sa_agg)
+
+    res <- get_results(sa_coin, dset = "Aggregated", tab_type = "Full") %>%
+      mutate(
+        Year = as.integer(str_extract(uCode, "\\d{4}$")),
+        Country = str_remove(uCode, "_\\d{4}$")
+      )
+    res <- append_gcc_aggregate(res)
+
+    # Return GCC aggregate rows + dimension scores
+    res %>%
+      filter(Country == "GCC") %>%
+      select(Country, Year, Trade, Financial, Labor,
+             Infrastructure, Sustainability, Convergence, Index) %>%
+      mutate(iteration = sa_i, norm = sa_norm, agg = sa_agg, weights = sa_wt_name)
+  }, error = function(e) {
+    sa_ext_errors <<- c(sa_ext_errors,
+      paste0(sa_norm, "+", sa_agg, "+", sa_wt_name, ": ", e$message))
+    NULL
+  })
+
+  sa_ext_results[[sa_i]] <- sa_res
+}
+
+sa_ext_all <- bind_rows(sa_ext_results)
+sa_ext_ok <- sum(!sapply(sa_ext_results, is.null))
+
+# --- GCC Aggregate sensitivity summary ---
+message(paste("\n✓ Extended SA complete (", sa_ext_ok, "/", sa_ext_N,
+              "replications succeeded )"))
+
+# Method breakdown
+sa_ext_counts <- sa_ext_all %>%
+  distinct(iteration, norm, agg, weights) %>%
+  count(norm, agg, weights, name = "n")
+message("\n  Method combinations (norm + agg + weights):")
+for (r in seq_len(nrow(sa_ext_counts))) {
+  rc <- sa_ext_counts[r, ]
+  message(sprintf("    %-10s + %-8s + %-12s : %d replications",
+                  rc$norm, rc$agg, rc$weights, rc$n))
+}
+
+if (length(sa_ext_errors) > 0) {
+  message(paste("\n  Failed:", length(sa_ext_errors), "total"))
+}
+
+# Summarise GCC Index by year across all methodological variations
+sa_gcc_summary <- sa_ext_all %>%
+  group_by(Year) %>%
+  summarize(
+    mean_index = round(mean(Index, na.rm = TRUE), 2),
+    sd_index   = round(sd(Index, na.rm = TRUE), 2),
+    min_index  = round(min(Index, na.rm = TRUE), 2),
+    max_index  = round(max(Index, na.rm = TRUE), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(Year)
+
+message("\nGCC Aggregate Index - sensitivity range by year:")
+message(sprintf("  %-6s  %8s  %8s  %8s  %8s",
+                "Year", "Mean", "SD", "Min", "Max"))
+for (i in seq_len(nrow(sa_gcc_summary))) {
+  r <- sa_gcc_summary[i, ]
+  message(sprintf("  %-6d  %8.2f  %8.2f  %8.2f  %8.2f",
+                  r$Year, r$mean_index, r$sd_index, r$min_index, r$max_index))
+}
+
+# Dimension-level sensitivity for GCC (latest year)
+sa_gcc_dim <- sa_ext_all %>%
+  filter(Year == latest_year) %>%
+  pivot_longer(cols = c(Trade, Financial, Labor, Infrastructure,
+                        Sustainability, Convergence, Index),
+               names_to = "Dimension", values_to = "Score") %>%
+  group_by(Dimension) %>%
+  summarize(
+    mean_score = round(mean(Score, na.rm = TRUE), 2),
+    sd_score   = round(sd(Score, na.rm = TRUE), 2),
+    min_score  = round(min(Score, na.rm = TRUE), 2),
+    max_score  = round(max(Score, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+message(paste0("\nGCC Dimension Scores (", latest_year, ") - sensitivity range:"))
+message(sprintf("  %-18s  %8s  %8s  %8s  %8s",
+                "Dimension", "Mean", "SD", "Min", "Max"))
+for (i in seq_len(nrow(sa_gcc_dim))) {
+  r <- sa_gcc_dim[i, ]
+  message(sprintf("  %-18s  %8.2f  %8.2f  %8.2f  %8.2f",
+                  r$Dimension, r$mean_score, r$sd_score, r$min_score, r$max_score))
+}
+
+# Impact of each methodological choice on GCC Index (latest year)
+sa_gcc_latest <- sa_ext_all %>% filter(Year == latest_year)
+
+sa_impact <- bind_rows(
+  sa_gcc_latest %>% group_by(choice = norm) %>%
+    summarize(mean_idx = mean(Index, na.rm = TRUE), .groups = "drop") %>%
+    mutate(factor = "Normalization"),
+  sa_gcc_latest %>% group_by(choice = agg) %>%
+    summarize(mean_idx = mean(Index, na.rm = TRUE), .groups = "drop") %>%
+    mutate(factor = "Aggregation"),
+  sa_gcc_latest %>% group_by(choice = weights) %>%
+    summarize(mean_idx = mean(Index, na.rm = TRUE), .groups = "drop") %>%
+    mutate(factor = "Weighting")
+)
+
+message(paste0("\nImpact of methodological choices on GCC Index (", latest_year, "):"))
+for (f in unique(sa_impact$factor)) {
+  message(paste0("  ", f, ":"))
+  sub <- sa_impact %>% filter(factor == f) %>% arrange(desc(mean_idx))
+  for (i in seq_len(nrow(sub))) {
+    message(sprintf("    %-14s  %.2f", sub$choice[i], sub$mean_idx[i]))
+  }
+}
+
+# Export
+write_csv(sa_ext_all, "output/gcceii_sensitivity_gcc_detail.csv")
+write_csv(sa_gcc_summary, "output/gcceii_sensitivity_gcc_summary.csv")
+message("\n  Saved to output/gcceii_sensitivity_gcc_detail.csv")
+message("  Saved to output/gcceii_sensitivity_gcc_summary.csv")
