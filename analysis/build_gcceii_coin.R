@@ -185,9 +185,14 @@ results <- get_results(gcceii_coin, dset = "Aggregated", tab_type = "Full") %>%
     Year = as.integer(str_extract(uCode, "\\d{4}$")),
     Country = str_remove(uCode, "_\\d{4}$")
   ) %>%
-  arrange(Year, desc(Index))
+  # Replace COINr's pooled rank with within-year rank
+  select(-Rank) %>%
+  group_by(Year) %>%
+  mutate(Rank = rank(-Index, ties.method = "min")) %>%
+  ungroup() %>%
+  arrange(Year, Rank)
 
-# Append GDP-weighted GCC aggregate
+# Append GDP-weighted GCC aggregate (no rank for GCC)
 results <- append_gcc_aggregate(results)
 
 # Latest year summary
@@ -195,9 +200,9 @@ latest_year <- max(results$Year)
 
 latest_results <- results %>%
   filter(Year == latest_year) %>%
-  select(Country, Trade, Financial, Labor,
+  select(Country, Rank, Trade, Financial, Labor,
          Infrastructure, Sustainability, Convergence, Index) %>%
-  arrange(Country == "GCC", desc(Index))
+  arrange(Country == "GCC", Rank)
 
 message("\n=======================================================")
 message(paste("  GCC EII RESULTS -", latest_year))
