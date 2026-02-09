@@ -1140,7 +1140,10 @@ append_gcc_aggregate <- function(results,
       across(all_of(score_cols), ~ weighted.mean(.x, w, na.rm = TRUE)),
       .groups = "drop"
     ) %>%
-    mutate(Country = "GCC")
+    mutate(
+      Country = "GCC",
+      uCode = paste0("GCC_", Year)
+    )
 
   # Carry over any other columns as NA
   missing_cols <- setdiff(names(results), names(gcc_agg))
