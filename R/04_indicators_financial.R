@@ -174,23 +174,23 @@ calc_banking_raw <- function(common_market, population_data, year_filter) {
   
   gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
   
-  # Get GCC banks count by HOST country
+  # Get GCC banks count by HOST country (use only KN_TTL aggregate rows
+  # to avoid double-counting with nationality-breakdown rows)
   gcc_banks <- common_market %>%
     filter(
       indicator_code == "KN_A15",
+      citizen_code == "KN_TTL",
       year == year_filter,
       host_country %in% gcc_countries
     )
-  
+
   # Return NA if no data for this year
   if (nrow(gcc_banks) == 0) {
     return(tibble(uName = gcc_countries, ind_39_banking = NA_real_))
   }
-  
+
   gcc_banks <- gcc_banks %>%
-    group_by(host_country) %>%
-    summarize(gcc_banks_count = sum(value, na.rm = TRUE), .groups = "drop") %>%
-    rename(country = host_country)
+    select(country = host_country, gcc_banks_count = value)
   
   # Get population
   pop <- get_total_population(population_data, year_filter) %>%
