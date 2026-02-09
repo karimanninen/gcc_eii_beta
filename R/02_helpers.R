@@ -624,14 +624,22 @@ impute_gcceii <- function(coin) {
       usable_cols <- names(remaining_na_per_col[remaining_na_per_col < n_rows])
       em_input <- as.data.frame(imputed_df[, usable_cols, drop = FALSE])
 
+      # empri: empirical prior (ridge regularization) — needed because
+      # the number of indicators can exceed what 54 observations support.
+      # Setting empri = 0.5 * nrow adds moderate regularization.
+      empri_val <- max(1, round(0.5 * nrow(em_input)))
+
       amelia_result <- tryCatch({
-        Amelia::amelia(em_input, m = 1, p2s = 0)
+        Amelia::amelia(em_input, m = 1, p2s = 0, empri = empri_val)
       }, error = function(e) {
         warning(paste("Amelia EM failed:", e$message, "- falling back to group median"))
         NULL
       })
 
-      if (!is.null(amelia_result)) {
+      # Check Amelia return code: $code == 1 means success
+      if (!is.null(amelia_result) &&
+          !is.null(amelia_result$code) &&
+          amelia_result$code == 1) {
         em_output <- as_tibble(amelia_result$imputations[[1]])
         n_em <- 0
 
@@ -657,6 +665,11 @@ impute_gcceii <- function(coin) {
 
         message(paste("  Imputed", n_em, "values via EM algorithm"))
         em_success <- TRUE
+      } else {
+        if (!is.null(amelia_result) && !is.null(amelia_result$code)) {
+          message(paste("  Amelia returned error code", amelia_result$code,
+                        "- falling back to group median"))
+        }
       }
     } else {
       message("  Amelia package not installed — falling back to group median")
