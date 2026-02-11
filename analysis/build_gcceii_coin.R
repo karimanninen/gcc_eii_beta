@@ -465,10 +465,12 @@ for (sa_i in seq_len(sa_N)) {
   )
 
   sa_coin <- tryCatch({
-    c_tmp <- Normalise(gcceii_coin, dset = sa_source,
-                       global_specs = sa_specs,
-                       write_to = "SA_Normalised")
-    Aggregate(c_tmp, dset = "SA_Normalised", f_ag = sa_agg)
+    suppressMessages({
+      c_tmp <- Normalise(gcceii_coin, dset = sa_source,
+                         global_specs = sa_specs,
+                         write_to = "SA_Normalised")
+      Aggregate(c_tmp, dset = "SA_Normalised", f_ag = sa_agg)
+    })
   }, error = function(e) {
     sa_errors <<- c(sa_errors, paste0(sa_norm, "+", sa_agg, ": ", e$message))
     NULL
@@ -594,10 +596,12 @@ for (sa_i in seq_len(sa_ext_N)) {
       if (length(idx) == 1) sa_coin$Meta$Ind$Weight[idx] <- sa_wt$dim[d]
     }
 
-    sa_coin <- Normalise(sa_coin, dset = sa_source,
-                         global_specs = sa_specs,
-                         write_to = "SA_Normalised")
-    sa_coin <- Aggregate(sa_coin, dset = "SA_Normalised", f_ag = sa_agg)
+    suppressMessages({
+      sa_coin <- Normalise(sa_coin, dset = sa_source,
+                           global_specs = sa_specs,
+                           write_to = "SA_Normalised")
+      sa_coin <- Aggregate(sa_coin, dset = "SA_Normalised", f_ag = sa_agg)
+    })
 
     res <- get_results(sa_coin, dset = "Aggregated", tab_type = "Full") %>%
       mutate(
