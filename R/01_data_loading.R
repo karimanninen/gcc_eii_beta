@@ -554,7 +554,7 @@ load_comtrade_data <- function(data_dir = ".") {
 #   data_list <- load_gcc_data_fusion()
 #
 # Credential setup:
-#   1. Add GCCSTAT_DB_PASSWORD=your_password to .Renviron
+#   1. Add MARSA_PASSWORD=your_password to .Renviron
 #   2. Edit pipeline/config.R with host, dbname, user if needed
 #   3. Restart R so .Renviron is loaded
 #

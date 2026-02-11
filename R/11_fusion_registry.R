@@ -13,8 +13,9 @@
 #   data_list <- load_gcc_data_fusion()
 #
 # Configuration:
-#   Requires pipeline/config.R with db_config, extraction_config, and
-#   dataflow_tables. See that file for credential setup instructions.
+#   Requires pipeline/config.R with db_config, extraction_config,
+#   dataflow_tables, and column_mappings.
+#   See that file for credential setup instructions.
 #
 # Adapted from: data-raw/scripts/01_extract_fusion.R
 # =============================================================================
@@ -39,8 +40,8 @@ fusion_connect <- function() {
     stop("db_config not found. Run: source('pipeline/config.R') first.")
   }
   if (db_config$password == "") {
-    stop("Database password not set. Add GCCSTAT_DB_PASSWORD to .Renviron\n",
-         "  or set via: Sys.setenv(GCCSTAT_DB_PASSWORD = 'your_password')")
+    stop("Database password not set. Add MARSA_PASSWORD to .Renviron\n",
+         "  or set via: Sys.setenv(MARSA_PASSWORD = 'your_password')")
   }
 
   message("Connecting to MARSA warehouse...")
@@ -110,6 +111,22 @@ fusion_fetch <- function(con, table_name, columns = "*", extra_where = NULL) {
   })
 }
 
+#' Build SQL column aliases from column_mappings
+#'
+#' Converts a column_mappings entry into SQL SELECT expressions with
+#' proper quoting and aliasing. Always appends TIME_PERIOD and OBS_VALUE.
+#'
+#' @param mapping Named list from column_mappings (e.g. column_mappings$cpi)
+#' @return Character vector of SQL column expressions
+fusion_build_columns <- function(mapping) {
+  cols <- vapply(names(mapping), function(alias) {
+    paste0('"', mapping[[alias]], '" AS ', alias)
+  }, character(1))
+
+  # Always include time/value columns
+  c(cols, '"TIME_PERIOD" AS time_period', '"OBS_VALUE" AS value')
+}
+
 # =============================================================================
 # PARSING & TRANSFORMATION HELPERS
 # =============================================================================
@@ -152,7 +169,8 @@ fusion_filter_gcc <- function(df,
 # =============================================================================
 # DATASET-SPECIFIC LOADERS
 #
-# Each returns data in identical format to the CSV loader in 01_data_loading.R
+# Each returns data in identical format to the CSV loader in 01_data_loading.R.
+# Column names are resolved from column_mappings in pipeline/config.R.
 # =============================================================================
 
 #' Load National Accounts from Fusion Registry
@@ -165,15 +183,8 @@ load_national_accounts_fusion <- function(con,
                                           end_year   = extraction_config$end_year) {
 
   message("Extracting National Accounts...")
-  raw <- fusion_fetch(con, dataflow_tables$national_accounts, columns = c(
-    '"COUNTRY_en" AS country',
-    '"FREQUENCY_en" AS frequency',
-    '"PRICES TYPES_en" AS price_type',
-    '"INDICATOR_en" AS indicator',
-    '"UNIT_en" AS unit',
-    '"TIME_PERIOD" AS time_period',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$national_accounts)
+  raw <- fusion_fetch(con, dataflow_tables$national_accounts, columns = cols)
   if (is.null(raw)) return(NULL)
 
   raw %>%
@@ -198,14 +209,8 @@ load_cpi_fusion <- function(con,
                             end_year   = extraction_config$end_year) {
 
   message("Extracting CPI...")
-  raw <- fusion_fetch(con, dataflow_tables$cpi, columns = c(
-    '"COUNTRY_en" AS country',
-    '"UNIT_en" AS unit',
-    '"FREQUENCY_en" AS frequency',
-    '"INDICATOR_en" AS indicator',
-    '"TIME_PERIOD" AS time_period',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$cpi)
+  raw <- fusion_fetch(con, dataflow_tables$cpi, columns = cols)
   if (is.null(raw)) return(NULL)
 
   raw %>%
@@ -228,22 +233,14 @@ load_monetary_fusion <- function(con,
                                  end_year   = extraction_config$end_year) {
 
   message("Extracting Monetary & Financial...")
-  raw <- fusion_fetch(con, dataflow_tables$monetary, columns = c(
-    '"COUNTRY_en" AS country',
-    '"FREQUENCY_en" AS frequency',
-    '"INDICATOR_en" AS indicator',
-    '"UNIT_en" AS unit',
-    '"TIME_PERIOD" AS time_period',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$monetary)
+  raw <- fusion_fetch(con, dataflow_tables$monetary, columns = cols)
   if (is.null(raw)) return(NULL)
 
   raw %>%
     mutate(
       country = fusion_recode_country(country),
-      year    = if_else(str_detect(time_period, "-"),
-                        as.integer(str_sub(time_period, 1, 4)),
-                        as.integer(time_period)),
+      year    = fusion_parse_year(time_period),
       value   = as.numeric(value),
       source  = "monetary"
     ) %>%
@@ -261,23 +258,14 @@ load_labor_fusion <- function(con,
                               end_year   = extraction_config$end_year) {
 
   message("Extracting Labour Force...")
-  raw <- fusion_fetch(con, dataflow_tables$labor, columns = c(
-    '"COUNTRY_en" AS country',
-    '"INDICATOR_en" AS indicator',
-    '"LABOUR ASPECT_en" AS labour_aspect',
-    '"NATIONALITY_en" AS nationality',
-    '"UNIT_en" AS unit',
-    '"GENDER_en" AS gender',
-    '"FREQUENCY_en" AS frequency',
-    '"TIME_PERIOD" AS time_period',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$labor)
+  raw <- fusion_fetch(con, dataflow_tables$labor, columns = cols)
   if (is.null(raw)) return(NULL)
 
   raw %>%
     mutate(
       country = fusion_recode_country(country),
-      year    = as.integer(str_sub(time_period, 1, 4)),
+      year    = fusion_parse_year(time_period),
       quarter = fusion_parse_quarter(time_period),
       value   = as.numeric(value),
       source  = "labor"
@@ -296,21 +284,16 @@ load_population_fusion <- function(con,
                                    end_year   = extraction_config$end_year) {
 
   message("Extracting Population...")
-  raw <- fusion_fetch(con, dataflow_tables$population, columns = c(
-    '"COUNTRY_en" AS country',
-    '"NATIONALITY_en" AS nationality',
-    '"GENDER_en" AS gender',
-    '"AGE_en" AS age',
-    '"FREQUENCY_en" AS frequency',
-    '"TIME_PERIOD" AS year',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$population)
+  raw <- fusion_fetch(con, dataflow_tables$population, columns = cols)
   if (is.null(raw)) return(NULL)
 
+  # Population column_mappings doesn't include time_period/value aliases,
+  # but fusion_build_columns() adds them automatically
   raw %>%
     mutate(
       country = fusion_recode_country(country),
-      year    = as.integer(year),
+      year    = fusion_parse_year(time_period),
       value   = as.numeric(value),
       source  = "population"
     ) %>%
@@ -327,21 +310,14 @@ load_energy_fusion <- function(con,
                                end_year   = extraction_config$end_year) {
 
   message("Extracting Energy...")
-  raw <- fusion_fetch(con, dataflow_tables$energy, columns = c(
-    '"COUNTRY_en" AS country',
-    '"PRODUCT_en" AS product',
-    '"FLOW_en" AS flow',
-    '"INDICATOR_en" AS indicator',
-    '"UNIT_en" AS unit',
-    '"TIME_PERIOD" AS year',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$energy)
+  raw <- fusion_fetch(con, dataflow_tables$energy, columns = cols)
   if (is.null(raw)) return(NULL)
 
   raw %>%
     mutate(
       country = fusion_recode_country(country),
-      year    = as.integer(year),
+      year    = fusion_parse_year(time_period),
       value   = as.numeric(value),
       source  = "energy"
     ) %>%
@@ -358,20 +334,14 @@ load_tourism_fusion <- function(con,
                                 end_year   = extraction_config$end_year) {
 
   message("Extracting Tourism...")
-  raw <- fusion_fetch(con, dataflow_tables$tourism, columns = c(
-    '"COUNTRY_en" AS country',
-    '"PARTENER COUNTRY_en" AS partner',
-    '"INDICATOR_en" AS indicator',
-    '"FREQUENCY_en" AS frequency',
-    '"TIME_PERIOD" AS year',
-    '"OBS_VALUE" AS value'
-  ))
+  cols <- fusion_build_columns(column_mappings$tourism)
+  raw <- fusion_fetch(con, dataflow_tables$tourism, columns = cols)
   if (is.null(raw)) return(NULL)
 
   raw %>%
     mutate(
       country = fusion_recode_country(country),
-      year    = as.integer(year),
+      year    = fusion_parse_year(time_period),
       value   = as.numeric(value),
       source  = "tourism"
     ) %>%
@@ -391,41 +361,18 @@ load_common_market_fusion <- function(con,
 
   message("Extracting Common Market Tables...")
 
-  # Fetch all columns - this table has paired code/label columns
-  raw <- fusion_fetch(con, dataflow_tables$common_market)
+  # Build SELECT columns from column_mappings
+  cm_map <- column_mappings$common_market
+  cols <- fusion_build_columns(cm_map)
+
+  # Rename time_period -> year in the alias for this table (annual only)
+  cols <- sub('"TIME_PERIOD" AS time_period', '"TIME_PERIOD" AS year', cols,
+              fixed = TRUE)
+  # Remove the OBS_VALUE alias and re-add as 'value'
+  # (fusion_build_columns already adds it as 'value', so this is fine)
+
+  raw <- fusion_fetch(con, dataflow_tables$common_market, columns = cols)
   if (is.null(raw)) return(NULL)
-
-  cols <- names(raw)
-
-  # Map Fusion columns to our standard names
-  # DB columns may be: COUNTRY, COUNTRY_en, TRACK, TRACK_en, etc.
-  find_col <- function(patterns) {
-    for (p in patterns) {
-      m <- cols[grepl(p, cols, ignore.case = TRUE)]
-      if (length(m) > 0) return(m[1])
-    }
-    NA_character_
-  }
-
-  col_map <- list(
-    country_code   = find_col(c("^COUNTRY$", "REF_AREA$")),
-    country        = find_col(c("COUNTRY_en$", "^Country\\.\\.\\.2$")),
-    track          = find_col(c("^TRACK$", "^Track\\.\\.\\.3$")),
-    track_name     = find_col(c("TRACK_en$", "^Track\\.\\.\\.4$")),
-    indicator_code = find_col(c("^INDICATOR$", "^Indicator\\.\\.\\.5$")),
-    indicator      = find_col(c("INDICATOR_en$", "^Indicator\\.\\.\\.6$")),
-    citizen_code   = find_col(c("^CITIZEN$", "^Citizen\\.\\.\\.7$")),
-    citizen        = find_col(c("CITIZEN_en$", "^Citizen\\.\\.\\.8$")),
-    sex_code       = find_col(c("^SEX$", "^Sex\\.\\.\\.9$")),
-    sex            = find_col(c("SEX_en$", "^Sex\\.\\.\\.10$")),
-    year           = find_col(c("TIME_PERIOD")),
-    value          = find_col(c("OBS_VALUE"))
-  )
-
-  for (std in names(col_map)) {
-    fc <- col_map[[std]]
-    if (!is.na(fc) && fc %in% cols) names(raw)[names(raw) == fc] <- std
-  }
 
   raw %>%
     select(any_of(c("country_code", "country", "track", "track_name",
@@ -487,7 +434,8 @@ load_gcc_data_fusion <- function(start_year        = extraction_config$start_yea
                                  verbose           = TRUE,
                                  save_raw          = FALSE) {
 
-  if (!exists("db_config") || !exists("dataflow_tables")) {
+  if (!exists("db_config") || !exists("dataflow_tables") ||
+      !exists("column_mappings")) {
     stop("Fusion config not loaded. Run: source('pipeline/config.R') first.")
   }
 
