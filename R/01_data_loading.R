@@ -133,21 +133,24 @@ load_common_market_csv <- function(data_dir = ".") {
   df <- read_csv(file_path, show_col_types = FALSE)
 
   # Rename columns to standard names matching the downstream contract
-  # New file columns: Country, Country.1, Track, Track.1, Indicator,
-  #   Indicator.1, Citizen, Citizen.1, Sex, Sex.1, Units, Frequency,
-  #   Frequency.1, TIME_PERIOD, OBS_VALUE
+  # CSV has paired code/label columns with duplicate names, which read_csv
+
+  # auto-renames using ...N positional suffixes:
+  #   Country...1, Country...2, Track...3, Track...4, Indicator...5,
+  #   Indicator...6, Citizen...7, Citizen...8, Sex...9, Sex...10,
+  #   Units, Frequency...12, Frequency...13, TIME_PERIOD, OBS_VALUE
   df_long <- df %>%
     rename(
-      country_code = Country,
-      country = Country.1,
-      track = Track,
-      track_name = Track.1,
-      indicator_code = Indicator,
-      indicator = Indicator.1,
-      citizen_code = Citizen,
-      citizen = Citizen.1,
-      sex_code = Sex,
-      sex = Sex.1,
+      country_code = `Country...1`,
+      country = `Country...2`,
+      track = `Track...3`,
+      track_name = `Track...4`,
+      indicator_code = `Indicator...5`,
+      indicator = `Indicator...6`,
+      citizen_code = `Citizen...7`,
+      citizen = `Citizen...8`,
+      sex_code = `Sex...9`,
+      sex = `Sex...10`,
       year = TIME_PERIOD,
       value = OBS_VALUE
     ) %>%
