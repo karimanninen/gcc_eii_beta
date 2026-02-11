@@ -10,15 +10,15 @@
 # Structure:
 #   1. Configuration & Constants
 #   2. CSV Data Loading (current implementation)
-#   3. SDMX Data Loading (future implementation - placeholder)
+#   3. Fusion Registry Data Loading (see R/11_fusion_registry.R)
 #   4. Data Cleaning & Standardization
 #   5. Main Loading Function
 #   6. Raw Indicator Extraction
 #
-# Future Migration:
-#   The CSV loading functions are designed to be replaced with SDMX pipelines
-#   connecting to warehouse.marsa.gccstat.org. The output structure will
-#   remain identical, enabling seamless transition.
+# Fusion Registry:
+#   Use load_gcc_data(source = "fusion") to pull directly from the MARSA
+#   Dissemination Warehouse via PostgreSQL. See R/11_fusion_registry.R and
+#   pipeline/config.R for setup. Output format is identical to CSV loading.
 #
 # =============================================================================
 
@@ -535,30 +535,31 @@ load_comtrade_data <- function(data_dir = ".") {
 }
 
 # =============================================================================
-# SECTION 3: SDMX DATA LOADING (FUTURE IMPLEMENTATION)
+# SECTION 3: FUSION REGISTRY DATA LOADING
 # =============================================================================
-
-#' Load Data via SDMX (Placeholder)
-#'
-#' Future implementation will connect to warehouse.marsa.gccstat.org
-#' and retrieve data directly via SDMX protocols.
-#'
-#' @param dataflow SDMX dataflow identifier
-#' @param filters List of dimension filters
-#' @return Tibble with standardized data
-load_sdmx_data <- function(dataflow, filters = list()) {
-  
-  # Placeholder for future SDMX implementation
-  # Will use rsdmx package or direct REST API calls
-  #
-  # Example structure:
-  # library(rsdmx)
-  # url <- paste0("https://warehouse.marsa.gccstat.org/sdmx/", dataflow)
-  # data <- readSDMX(url)
-  # as_tibble(data)
-  
-  stop("SDMX loading not yet implemented. Use CSV loading functions.")
-}
+#
+# PostgreSQL data pipelines to the GCC-Stat Fusion Registry (MARSA
+# Dissemination Warehouse). The full implementation lives in a separate
+# module to keep this file focused:
+#
+#   R/11_fusion_registry.R   - All Fusion extraction functions
+#   pipeline/config.R        - Database credentials & table mappings
+#
+# Usage:
+#   source("pipeline/config.R")           # Load DB credentials
+#   source("R/11_fusion_registry.R")      # Load Fusion module
+#   data_list <- load_gcc_data(source = "fusion")
+#
+# Or equivalently:
+#   data_list <- load_gcc_data_fusion()
+#
+# Credential setup:
+#   1. Add MARSA_PASSWORD=your_password to .Renviron
+#   2. Edit pipeline/config.R with host, dbname, user if needed
+#   3. Restart R so .Renviron is loaded
+#
+# See pipeline/config.R for full documentation.
+# =============================================================================
 
 # =============================================================================
 # SECTION 4: DATA CLEANING & STANDARDIZATION
@@ -667,21 +668,46 @@ ensure_all_gcc_countries <- function(df, fill_cols = NULL) {
 #' Load All GCC-Stat Datasets
 #'
 #' Main entry point for loading all data sources required for the
-#' GCC Economic Integration Index calculation.
+#' GCC Economic Integration Index calculation. Supports two data sources:
+#'   - "csv"    : Load from local CSV files in data_dir (default, no network)
+#'   - "fusion" : Load from Fusion Registry via PostgreSQL
 #'
-#' @param data_dir Directory containing data files (default: current directory)
+#' When source = "fusion", delegates to load_gcc_data_fusion() from
+#' R/11_fusion_registry.R. Requires pipeline/config.R to be sourced first.
+#' See that file for credential setup instructions.
+#'
+#' @param data_dir Directory containing CSV data files (used when source = "csv")
+#' @param source Data source: "csv" (local files) or "fusion" (Fusion Registry)
 #' @param standardize Logical, whether to standardize country names (default: TRUE)
 #' @param remove_aggregates Logical, whether to remove GCC aggregates (default: TRUE)
 #' @param verbose Logical, whether to print progress messages (default: TRUE)
 #' @return Named list of cleaned dataframes
 #' @export
 load_gcc_data <- function(data_dir = "data-raw",
+                          source = c("csv", "fusion"),
                           standardize = TRUE,
                           remove_aggregates = TRUE,
                           verbose = TRUE) {
-  
-  if (verbose) message("Loading GCC-Stat datasets...")
-  
+
+  source <- match.arg(source)
+
+  # --- Fusion Registry path ---
+  if (source == "fusion") {
+    if (!exists("load_gcc_data_fusion", mode = "function")) {
+      stop("Fusion module not loaded. Run these first:\n",
+           '  source("pipeline/config.R")\n',
+           '  source("R/11_fusion_registry.R")')
+    }
+    return(load_gcc_data_fusion(
+      standardize       = standardize,
+      remove_aggregates = remove_aggregates,
+      verbose           = verbose
+    ))
+  }
+
+  # --- CSV path (original implementation) ---
+  if (verbose) message("Loading GCC-Stat datasets from CSV...")
+
   # Load all datasets
   data_list <- list(
     common_market = load_common_market_csv(data_dir),
@@ -695,7 +721,7 @@ load_gcc_data <- function(data_dir = "data-raw",
     fdi = load_fdi_csv(data_dir),
     icp = load_icp_csv(data_dir)
   )
-  
+
   # Standardize country names if requested
   if (standardize) {
     if (verbose) message("  Standardizing country names...")
@@ -707,12 +733,12 @@ load_gcc_data <- function(data_dir = "data-raw",
       }
     })
   }
-  
+
   # Remove GCC aggregates from key datasets if requested
   if (remove_aggregates) {
     if (verbose) message("  Removing GCC aggregates from datasets...")
     # Only remove from datasets where we want country-level data
-    datasets_to_filter <- c("national_accounts", "population", "cpi", 
+    datasets_to_filter <- c("national_accounts", "population", "cpi",
                             "labor", "monetary", "energy")
     for (ds in datasets_to_filter) {
       if (!is.null(data_list[[ds]])) {
@@ -720,19 +746,19 @@ load_gcc_data <- function(data_dir = "data-raw",
       }
     }
   }
-  
+
   # Load Comtrade data
   if (verbose) message("  Loading Comtrade data...")
   comtrade_data <- load_comtrade_data(data_dir)
   data_list$comtrade <- comtrade_data$comtrade
   data_list$comtrade_hs <- comtrade_data$comtrade_hs
-  
+
   # Summary
   if (verbose) {
     loaded_count <- sum(sapply(data_list, function(x) !is.null(x)))
-    message(paste("✓ Loaded", loaded_count, "of", length(data_list), "datasets"))
+    message(paste("Loaded", loaded_count, "of", length(data_list), "datasets"))
   }
-  
+
   return(data_list)
 }
 
@@ -939,18 +965,22 @@ message("
   GCCEII DATA LOADING MODULE LOADED
 =======================================================
 
-Functions available:
-  - load_gcc_data()           : Load all GCC-Stat datasets
-  - load_comtrade_data()      : Load Comtrade trade data
-  - standardize_countries()   : Standardize country names
-  - get_gdp()                 : Extract GDP data
-  - get_total_population()    : Extract population data
-  - extract_raw_indicators()  : Extract all raw indicators for COINr
+Data Loading:
+  - load_gcc_data()                : Load from CSV (default)
+  - load_gcc_data(source='fusion') : Load from Fusion Registry
+  - load_comtrade_data()           : Load Comtrade trade data
 
-Configuration:
-  - GCC_CONFIG               : Country codes and names
+Fusion Registry (source R/11_fusion_registry.R separately):
+  - source('pipeline/config.R')    : Load DB credentials
+  - source('R/11_fusion_registry.R') : Load Fusion module
+  - load_gcc_data_fusion()         : Extract all from MARSA warehouse
+  - fusion_discover()              : Explore available tables
 
-  - DATA_SOURCES             : File paths and settings
+Utilities:
+  - standardize_countries()        : Standardize country names
+  - get_gdp()                      : Extract GDP data
+  - get_total_population()         : Extract population data
+  - extract_raw_indicators()       : Extract all raw indicators for COINr
 
 =======================================================
 ")
