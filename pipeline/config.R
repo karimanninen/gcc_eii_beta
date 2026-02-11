@@ -49,13 +49,13 @@ db_config <- list(
   password = Sys.getenv("MARSA_PASSWORD", "")
 )
 
-# Common Market lives on the "final" warehouse instance
+# Common Market lives on the "final" warehouse instance (port 5433)
 db_config_final <- list(
-  host     = Sys.getenv("MARSA_HOST",           "warehouse.marsa.gccstat.org"),
-  port     = as.integer(Sys.getenv("MARSA_PORT", "5434")),
-  dbname   = Sys.getenv("MARSA_DB_FINAL",       "prod-final-warehouse"),
-  user     = Sys.getenv("MARSA_USER",           "k.manninen"),
-  password = Sys.getenv("MARSA_PASSWORD",       "")
+  host     = Sys.getenv("MARSA_HOST",            "warehouse.marsa.gccstat.org"),
+  port     = as.integer(Sys.getenv("MARSA_PORT_FINAL", "5433")),
+  dbname   = Sys.getenv("MARSA_DB_FINAL",        "prod-final-warehouse"),
+  user     = Sys.getenv("MARSA_USER",            "k.manninen"),
+  password = Sys.getenv("MARSA_PASSWORD",        "")
 )
 
 # --- Extraction Settings -----------------------------------------------------
