@@ -355,11 +355,31 @@ load_tourism_fusion <- function(con,
 #'   country_code, country, track, track_name, indicator_code, indicator,
 #'   citizen_code, citizen, sex_code, sex, year, value, source,
 #'   citizen_country, host_country
-load_common_market_fusion <- function(con,
+load_common_market_fusion <- function(con = NULL,
                                       start_year = extraction_config$start_year,
                                       end_year   = extraction_config$end_year) {
 
   message("Extracting Common Market Tables...")
+
+  # Common Market lives on prod-final-warehouse, not prod-diss-warehouse.
+  # Open a dedicated connection if none was provided.
+  own_con <- FALSE
+  if (is.null(con)) {
+    if (!exists("db_config_final")) {
+      stop("db_config_final not found. Run: source('pipeline/config.R') first.")
+    }
+    message("  Connecting to final warehouse (", db_config_final$dbname, ")...")
+    con <- dbConnect(
+      RPostgres::Postgres(),
+      host     = db_config_final$host,
+      port     = db_config_final$port,
+      dbname   = db_config_final$dbname,
+      user     = db_config_final$user,
+      password = db_config_final$password
+    )
+    own_con <- TRUE
+  }
+  on.exit(if (own_con && dbIsValid(con)) dbDisconnect(con), add = TRUE)
 
   # Build SELECT columns from column_mappings
   cm_map <- column_mappings$common_market
@@ -368,8 +388,6 @@ load_common_market_fusion <- function(con,
   # Rename time_period -> year in the alias for this table (annual only)
   cols <- sub('"TIME_PERIOD" AS time_period', '"TIME_PERIOD" AS year', cols,
               fixed = TRUE)
-  # Remove the OBS_VALUE alias and re-add as 'value'
-  # (fusion_build_columns already adds it as 'value', so this is fine)
 
   raw <- fusion_fetch(con, dataflow_tables$common_market, columns = cols)
   if (is.null(raw)) return(NULL)
@@ -468,8 +486,15 @@ load_gcc_data_fusion <- function(start_year        = extraction_config$start_yea
   data_list$population   <- safe_extract("population", load_population_fusion)
   data_list$energy       <- safe_extract("energy", load_energy_fusion)
   data_list$tourism      <- safe_extract("tourism", load_tourism_fusion)
-  data_list$common_market <- safe_extract("common_market",
-                                           load_common_market_fusion)
+  # Common Market uses its own connection to prod-final-warehouse
+  if (verbose) message("\n--- COMMON_MARKET (final warehouse) ---")
+  data_list$common_market <- tryCatch(
+    load_common_market_fusion(con = NULL, start_year, end_year),
+    error = function(e) {
+      warning("common_market extraction failed: ", e$message)
+      NULL
+    }
+  )
 
   # External sources not in Fusion - load from CSV fallback
   if (verbose) message("\n--- EXTERNAL SOURCES (CSV) ---")

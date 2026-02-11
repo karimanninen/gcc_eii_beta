@@ -49,6 +49,15 @@ db_config <- list(
   password = Sys.getenv("MARSA_PASSWORD", "")
 )
 
+# Common Market lives on the "final" warehouse instance
+db_config_final <- list(
+  host     = Sys.getenv("MARSA_HOST",           "warehouse.marsa.gccstat.org"),
+  port     = as.integer(Sys.getenv("MARSA_PORT", "5434")),
+  dbname   = Sys.getenv("MARSA_DB_FINAL",       "prod-final-warehouse"),
+  user     = Sys.getenv("MARSA_USER",           "k.manninen"),
+  password = Sys.getenv("MARSA_PASSWORD",       "")
+)
+
 # --- Extraction Settings -----------------------------------------------------
 
 extraction_config <- list(
@@ -164,7 +173,8 @@ column_mappings <- list(
 
 message("Fusion Registry config loaded:")
 message("  Host: ", db_config$host, ":", db_config$port)
-message("  Database: ", db_config$dbname)
+message("  Database (diss): ", db_config$dbname)
+message("  Database (final): ", db_config_final$dbname)
 message("  User: ", db_config$user)
 message("  Password: ", if (nchar(db_config$password) > 0) "SET" else "NOT SET")
 message("  Year range: ", extraction_config$start_year, "-",
