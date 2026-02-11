@@ -51,7 +51,7 @@ message("✓ Data loaded\n")
 
 message("Step 2: Extracting raw indicators...")
 
-years <- 2015:2023
+years <- 2015:2024
 all_raw_data <- list()
 
 for (yr in years) {
