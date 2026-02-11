@@ -58,8 +58,8 @@ GCC_CONFIG <- list(
 #' Update these paths when migrating to SDMX or changing file locations
 DATA_SOURCES <- list(
   common_market = list(
-    file = "DF_Common_Market_Tables.csv",
-    skip_rows = 8,
+    file = "df_common_market_tables_NEW.csv",
+    skip_rows = 0,
     source_type = "csv"
   ),
   national_accounts = list(
@@ -103,7 +103,7 @@ DATA_SOURCES <- list(
     source_type = "csv"
   ),
   icp = list(
-    file = "ICP_data.csv",
+    file = "ICP_data_NEW.csv",
     skip_rows = 0,
     source_type = "csv"
   )
@@ -114,58 +114,50 @@ DATA_SOURCES <- list(
 # =============================================================================
 
 #' Load Common Market Tables
-#' Load Common Market Tables Data (Wide Format SDMX)
+#' Load Common Market Tables Data (Long Format SDMX)
 #'
-#' This file has a special structure:
-#' - 8 header rows to skip
-#' - Wide format with years as columns
-#' - Data by citizenship (nationality), not host country
+#' The new file (df_common_market_tables_NEW.csv) is already in long format
+#' with TIME_PERIOD and OBS_VALUE columns (SDMX style).
+#' Data by citizenship (nationality), not host country.
 #'
 #' @param data_dir Directory containing data files
 #' @return Cleaned tibble with common market data in long format
 load_common_market_csv <- function(data_dir = ".") {
   file_path <- file.path(data_dir, DATA_SOURCES$common_market$file)
-  
+
   if (!file.exists(file_path)) {
     warning(paste("Common Market file not found:", file_path))
     return(NULL)
   }
-  
-  # Read with 8 rows to skip (header metadata)
-  df <- read_csv(file_path, skip = 8, show_col_types = FALSE)
-  
-  # Identify year columns (numeric column names)
-  year_cols <- names(df)[grepl("^\\d{4}$", names(df))]
-  
-  # Pivot to long format
+
+  df <- read_csv(file_path, show_col_types = FALSE)
+
+  # Rename columns to standard names matching the downstream contract
+  # New file columns: Country, Country.1, Track, Track.1, Indicator,
+  #   Indicator.1, Citizen, Citizen.1, Sex, Sex.1, Units, Frequency,
+  #   Frequency.1, TIME_PERIOD, OBS_VALUE
   df_long <- df %>%
-    pivot_longer(
-      cols = all_of(year_cols),
-      names_to = "year",
-      values_to = "value"
+    rename(
+      country_code = Country,
+      country = Country.1,
+      track = Track,
+      track_name = Track.1,
+      indicator_code = Indicator,
+      indicator = Indicator.1,
+      citizen_code = Citizen,
+      citizen = Citizen.1,
+      sex_code = Sex,
+      sex = Sex.1,
+      year = TIME_PERIOD,
+      value = OBS_VALUE
     ) %>%
     mutate(
       year = as.integer(year),
-      value = as.numeric(value)
+      value = as.numeric(value),
+      source = "common_market"
     ) %>%
     filter(!is.na(value))
-  
-  # Rename columns to standard names
-  df_long <- df_long %>%
-    rename(
-      country_code = Country,
-      country = `Country Name`,
-      track = Track,
-      track_name = `Track Name`,
-      indicator_code = Indicator,
-      indicator = `Indicator Name`,
-      citizen_code = Citizen,
-      citizen = `Citizen Name`,
-      sex_code = Sex,
-      sex = `Sex Name`
-    ) %>%
-    mutate(source = "common_market")
-  
+
   # Map citizenship to standard country names for mobility indicators
   df_long <- df_long %>%
     mutate(
@@ -191,7 +183,7 @@ load_common_market_csv <- function(data_dir = ".") {
         TRUE ~ country
       )
     )
-  
+
   return(df_long)
 }
 
