@@ -252,6 +252,36 @@ export_methodology_xlsx(
   output_path = "output/GCCEII_Full_Methodology.xlsx"
 )
 
+# -------------------------------------------------------------------------
+# STEP 9a: DASHBOARD EXPORT ADAPTER
+# -------------------------------------------------------------------------
+# Translates gcc_eii_beta column schema → GCCEII dashboard schema
+# Dashboard repo: https://github.com/karimanninen/GCCEII
+# One-way file interface: gcc_eii_beta produces, dashboard consumes
+
+time_series_complete <- results %>%
+  transmute(
+    country              = Country,
+    year                 = Year,
+    overall_index        = Index,
+    trade_score          = Trade,
+    financial_score      = Financial,
+    labor_score          = Labor,
+    infrastructure_score = Infrastructure,
+    sustainability_score = Sustainability,
+    convergence_score    = Convergence,
+    integration_level    = case_when(
+      Index >= 60 ~ "Good",
+      Index >= 40 ~ "Moderate",
+      TRUE        ~ "Weak"
+    ),
+    method = if_else(Country == "GCC", "gdp", NA_character_)
+  )
+
+write_csv(time_series_complete, "output/time_series_complete.csv")
+save(time_series_complete, file = "output/gcc_integration_workspace.RData")
+message("✓ Dashboard exports: time_series_complete.csv + gcc_integration_workspace.RData")
+
 message("✓ Results exported to output/\n")
 
 # =============================================================================
