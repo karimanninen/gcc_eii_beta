@@ -486,20 +486,14 @@ load_gcc_data_fusion <- function(start_year        = extraction_config$start_yea
   data_list$population   <- safe_extract("population", load_population_fusion)
   data_list$energy       <- safe_extract("energy", load_energy_fusion)
   data_list$tourism      <- safe_extract("tourism", load_tourism_fusion)
-  # Common Market uses its own connection to prod-final-warehouse
-  if (verbose) message("\n--- COMMON_MARKET (final warehouse) ---")
-  data_list$common_market <- tryCatch(
-    load_common_market_fusion(con = NULL, start_year, end_year),
-    error = function(e) {
-      warning("common_market extraction failed: ", e$message)
-      NULL
-    }
-  )
 
-  # External sources not in Fusion - load from CSV fallback
+  # External sources not in Fusion - load from CSV / RDS fallback
   if (verbose) message("\n--- EXTERNAL SOURCES (CSV) ---")
-  data_list$fdi <- tryCatch(load_fdi_csv("data-raw"), error = function(e) NULL)
-  data_list$icp <- tryCatch(load_icp_csv("data-raw"), error = function(e) NULL)
+  data_list$common_market  <- tryCatch(load_common_market_csv("data-raw"), error = function(e) NULL)
+  data_list$fdi            <- tryCatch(load_fdi_csv("data-raw"), error = function(e) NULL)
+  data_list$icp            <- tryCatch(load_icp_csv("data-raw"), error = function(e) NULL)
+  data_list$fiscal         <- tryCatch(load_fiscal_csv("data-raw"), error = function(e) NULL)
+  data_list$interest_rates <- tryCatch(load_interest_rates_xlsx("data-raw"), error = function(e) NULL)
 
   if (verbose) message("  Loading Comtrade data...")
   comtrade_data <- tryCatch(load_comtrade_data("data-raw"),
