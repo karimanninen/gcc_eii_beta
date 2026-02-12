@@ -24,6 +24,7 @@
 
 library(tidyverse)
 library(readr)
+library(readxl)
 library(lubridate)
 
 # =============================================================================
@@ -106,6 +107,17 @@ DATA_SOURCES <- list(
     file = "ICP_data_NEW.csv",
     skip_rows = 0,
     source_type = "csv"
+  ),
+  fiscal = list(
+    file = "Fiscal_data_GCC.csv",
+    skip_rows = 0,
+    source_type = "csv"
+  ),
+  interest_rates = list(
+    file = "GCC_Interest_Rates_Harmonized.xlsx",
+    sheet = "Policy Rates",
+    skip_rows = 3,
+    source_type = "xlsx"
   )
 )
 
@@ -534,6 +546,118 @@ load_comtrade_data <- function(data_dir = ".") {
   ))
 }
 
+#' Load Fiscal Data (Wide-format GCC-Stat Table)
+#'
+#' Parses the wide-format fiscal CSV with sections: Total Revenues,
+#' Oil Revenues, Other Revenues, Total Expenditures, Investment
+#' Expenditures, Current Expenditures, Surplus (Deficit).
+#' Converts to long-format tidy tibble.
+#'
+#' @param data_dir Directory containing data files
+#' @return Cleaned tibble with columns: country, year, item, value
+load_fiscal_csv <- function(data_dir = ".") {
+  file_path <- file.path(data_dir, DATA_SOURCES$fiscal$file)
+
+  if (!file.exists(file_path)) {
+    warning(paste("Fiscal file not found:", file_path))
+    return(NULL)
+  }
+
+  # Read raw lines to parse section-based wide format
+  raw <- read_csv(file_path, col_names = FALSE, show_col_types = FALSE)
+
+  # Column mapping: col 2=Kuwait, 3=Qatar, 4=Oman, 5=KSA, 6=Bahrain, 7=UAE
+  country_cols <- c("Kuwait", "Qatar", "Oman", "Saudi Arabia", "Bahrain", "UAE")
+
+  # Identify section headers and year rows
+  # Section headers are text in column 1, year rows are numeric in column 1
+  results <- list()
+  current_section <- NA_character_
+
+  for (i in seq_len(nrow(raw))) {
+    val0 <- as.character(raw[[1]][i])
+    if (is.na(val0) || trimws(val0) == "") next
+
+    val0 <- trimws(val0)
+
+    # Check if this is a section header (non-numeric)
+    if (suppressWarnings(is.na(as.numeric(val0)))) {
+      current_section <- val0
+      next
+    }
+
+    # It's a year row
+    if (!is.na(current_section)) {
+      year_val <- as.integer(val0)
+      for (j in seq_along(country_cols)) {
+        col_idx <- j + 1  # columns 2-7
+        raw_val <- as.character(raw[[col_idx]][i])
+        # Remove comma thousands separators and parse
+        numeric_val <- suppressWarnings(as.numeric(gsub(",", "", raw_val)))
+        results[[length(results) + 1]] <- tibble(
+          country = country_cols[j],
+          year = year_val,
+          item = current_section,
+          value = numeric_val
+        )
+      }
+    }
+  }
+
+  df <- bind_rows(results) %>%
+    filter(!is.na(value)) %>%
+    mutate(source = "fiscal")
+
+  message(paste("  ✓ Loaded fiscal data:", nrow(df), "rows"))
+  return(df)
+}
+
+#' Load Interest Rates Data (Excel - Policy Rates)
+#'
+#' Reads Panel A (Policy Rates) from the GCC Interest Rates workbook.
+#' These are central bank administered rates, the most directly comparable
+#' across GCC due to USD-peg alignment with US Federal Reserve.
+#'
+#' @param data_dir Directory containing data files
+#' @return Cleaned tibble with columns: country, year, policy_rate
+load_interest_rates_xlsx <- function(data_dir = ".") {
+  file_path <- file.path(data_dir, DATA_SOURCES$interest_rates$file)
+
+  if (!file.exists(file_path)) {
+    warning(paste("Interest rates file not found:", file_path))
+    return(NULL)
+  }
+
+  if (!requireNamespace("readxl", quietly = TRUE)) {
+    warning("readxl package required for interest rates data")
+    return(NULL)
+  }
+
+  df <- readxl::read_excel(
+    file_path,
+    sheet = DATA_SOURCES$interest_rates$sheet,
+    skip = DATA_SOURCES$interest_rates$skip_rows
+  )
+
+  # Pivot to long format: Year + 6 country columns -> tidy
+  df_long <- df %>%
+    select(year = Year, `Saudi Arabia`, UAE, Qatar, Kuwait, Oman, Bahrain) %>%
+    pivot_longer(
+      cols = -year,
+      names_to = "country",
+      values_to = "policy_rate"
+    ) %>%
+    mutate(
+      year = as.integer(year),
+      policy_rate = as.numeric(policy_rate),
+      source = "interest_rates"
+    ) %>%
+    filter(!is.na(policy_rate))
+
+  message(paste("  ✓ Loaded interest rates:", nrow(df_long), "rows"))
+  return(df_long)
+}
+
 # =============================================================================
 # SECTION 3: FUSION REGISTRY DATA LOADING
 # =============================================================================
@@ -719,7 +843,9 @@ load_gcc_data <- function(data_dir = "data-raw",
     energy = load_energy_csv(data_dir),
     population = load_population_csv(data_dir),
     fdi = load_fdi_csv(data_dir),
-    icp = load_icp_csv(data_dir)
+    icp = load_icp_csv(data_dir),
+    fiscal = load_fiscal_csv(data_dir),
+    interest_rates = load_interest_rates_xlsx(data_dir)
   )
 
   # Standardize country names if requested
