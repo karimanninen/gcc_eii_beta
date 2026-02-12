@@ -65,6 +65,9 @@ extract_sustainability_raw <- function(data_list, year_filter) {
     filter(!country %in% c("GCC", "Gulf Cooperation Council")) %>%
     select(country, manufacturing_gdp = value)
   
+  # Non-oil revenue share from fiscal data
+  nonoil_rev <- calc_nonoil_rev_share_raw(data_list$fiscal, year_filter)
+
   # Calculate shares
   sustainability <- total_gdp %>%
     left_join(non_oil_gdp %>% select(country, non_oil), by = "country") %>%
@@ -75,13 +78,14 @@ extract_sustainability_raw <- function(data_list, year_filter) {
       ind_oil_share = (oil / gdp) * 100,
       ind_manufacturing_share = (manufacturing_gdp / gdp) * 100
     ) %>%
-    select(uName = country, ind_non_oil_share, ind_oil_share, ind_manufacturing_share)
-  
+    select(uName = country, ind_non_oil_share, ind_oil_share, ind_manufacturing_share) %>%
+    left_join(nonoil_rev, by = "uName")
+
   # Ensure all countries present
   all_countries <- tibble(uName = gcc_countries)
   sustainability <- all_countries %>%
     left_join(sustainability, by = "uName")
-  
+
   return(sustainability)
 }
 
@@ -89,6 +93,7 @@ extract_sustainability_raw <- function(data_list, year_filter) {
 # This file provides helper functions used by that module:
 #   - calc_ppp_gdp_pc_raw()
 #   - calc_price_level_raw()
+#   - calc_nonoil_rev_share_raw()
 
 # =============================================================================
 # INDIVIDUAL INDICATOR FUNCTIONS
@@ -156,6 +161,46 @@ calc_price_level_raw <- function(icp_data, year_filter) {
   return(price_level)
 }
 
+
+#' Non-oil Revenue Share (Raw)
+#'
+#' Calculates Other Revenues / Total Revenues * 100.
+#' Measures fiscal diversification away from hydrocarbon income.
+#' Higher value = more diversified government revenue base.
+#'
+#' @param fiscal_data Fiscal dataset from load_fiscal_csv()
+#' @param year_filter Year to calculate
+#' @return Tibble with uName, ind_nonoil_rev_share
+calc_nonoil_rev_share_raw <- function(fiscal_data, year_filter) {
+
+  gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
+
+  if (is.null(fiscal_data)) {
+    return(tibble(uName = gcc_countries, ind_nonoil_rev_share = NA_real_))
+  }
+
+  total_rev <- fiscal_data %>%
+    filter(item == "Total Revenues", year == year_filter) %>%
+    select(country, total_rev = value)
+
+  other_rev <- fiscal_data %>%
+    filter(item == "Other Revenues", year == year_filter) %>%
+    select(country, other_rev = value)
+
+  result <- total_rev %>%
+    inner_join(other_rev, by = "country") %>%
+    mutate(
+      ind_nonoil_rev_share = (other_rev / total_rev) * 100
+    ) %>%
+    select(uName = country, ind_nonoil_rev_share)
+
+  # Ensure all countries present
+  all_countries <- tibble(uName = gcc_countries)
+  result <- all_countries %>%
+    left_join(result, by = "uName")
+
+  return(result)
+}
 
 # =============================================================================
 # CONVERGENCE SCORE CALCULATION
@@ -256,6 +301,7 @@ Sustainability indicators:
   - ind_non_oil_share: Non-oil GDP share (%)
   - ind_oil_share: Oil GDP share (%)
   - ind_manufacturing_share: Manufacturing share (%)
+  - ind_nonoil_rev_share: Non-oil revenue share (%)
 
 Helper functions (used by 08_indicators_convergence.R):
   - calc_ppp_gdp_pc_raw()             : PPP GDP per capita

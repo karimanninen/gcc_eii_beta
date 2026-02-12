@@ -115,7 +115,8 @@ NORM_CONFIG <- list(
   zscore = c(
     "ind_gdp_growth",      # CV 206%, range -8.7 to +12% - OCA criterion
     "ind_inflation",       # CV 136%, range -2.6 to +5% - OCA criterion
-    "ind_m2_growth"        # CV 78%, range -3.2 to +15% - monetary sync
+    "ind_m2_growth",       # CV 78%, range -3.2 to +15% - monetary sync
+    "ind_fiscal_balance"   # Crosses zero (surplus/deficit as % of revenues)
   ),
   
   # =========================================================================
@@ -176,13 +177,16 @@ NORM_CONFIG <- list(
     "ind_non_oil_share",   # CV 15% - Non-oil GDP share
     "ind_oil_share",       # CV 38% - Oil dependency
     "ind_manufacturing_share", # CV 36% - Manufacturing share
-    
+    "ind_nonoil_rev_share",   # Non-oil revenue share (%)
+
     # Convergence (already 0-100 distance scores)
     "ind_conv_non_oil",       # CV 8% - Already normalized
     "ind_conv_manufacturing", # CV 26% - Already normalized
     "ind_conv_oil",           # CV 25% - Already normalized
     "ind_conv_income",        # CV 30% - Already normalized (ICP years only)
-    "ind_conv_price"          # CV 4% - Already normalized (ICP years only)
+    "ind_conv_price",         # CV 4% - Already normalized (ICP years only)
+    "ind_conv_fiscal",        # Fiscal balance convergence
+    "ind_conv_interest"       # Interest rate convergence (policy rates)
   )
 )
 

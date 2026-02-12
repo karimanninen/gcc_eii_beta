@@ -59,6 +59,7 @@ build_iMeta <- function(version = "poc") {
     "ind_44_stock", "Stock Market Openness", "Financial", 1, 1,
     "ind_31_fdi", "Intra-GCC FDI", "Financial", 1, 1,
     "ind_bank_depth", "Banking Depth", "Financial", 1, 1,
+    "ind_fiscal_balance", "Fiscal Balance Ratio", "Financial", 1, 1,
     
     # -----------------------------------------------------------------------
     # LABOR & MOBILITY DIMENSION
@@ -81,6 +82,7 @@ build_iMeta <- function(version = "poc") {
     "ind_non_oil_share", "Non-oil GDP Share", "Sustainability", 1, 1,
     "ind_oil_share", "Oil Dependency", "Sustainability", 1, -1,
     "ind_manufacturing_share", "Manufacturing Share", "Sustainability", 1, 1,
+    "ind_nonoil_rev_share", "Non-oil Revenue Share", "Sustainability", 1, 1,
     
     # -----------------------------------------------------------------------
     # CONVERGENCE DIMENSION (Country-specific distance from GCC average)
@@ -90,6 +92,8 @@ build_iMeta <- function(version = "poc") {
     "ind_conv_oil", "Oil Dependency Convergence", "Convergence", 1, 1,
     "ind_conv_income", "Real Income Convergence", "Convergence", 1, 1,
     "ind_conv_price", "Price Level Convergence", "Convergence", 1, 1,
+    "ind_conv_fiscal", "Fiscal Balance Convergence", "Convergence", 1, 1,
+    "ind_conv_interest", "Interest Rate Convergence", "Convergence", 1, 1,
   )
   
   # Add Level and Type for indicators
@@ -192,6 +196,7 @@ get_indicator_code_mapping <- function() {
     "ind_44_stock" = "ind_44_stock",
     "ind_31_fdi" = "ind_31_fdi",
     "ind_bank_depth" = "ind_bank_depth",
+    "ind_fiscal_balance" = "ind_fiscal_balance",
     
     # Labor
     "ind_69_labor" = "ind_69_labor",
@@ -208,10 +213,13 @@ get_indicator_code_mapping <- function() {
     "ind_non_oil_share" = "ind_non_oil_share",
     "ind_oil_share" = "ind_oil_share",
     "ind_manufacturing_share" = "ind_manufacturing_share",
+    "ind_nonoil_rev_share" = "ind_nonoil_rev_share",
     
     # Convergence
     "ind_ppp_gdp_pc" = "ind_ppp_gdp_pc",
-    "ind_price_level" = "ind_price_level"
+    "ind_price_level" = "ind_price_level",
+    "ind_conv_fiscal" = "ind_conv_fiscal",
+    "ind_conv_interest" = "ind_conv_interest"
   )
 }
 

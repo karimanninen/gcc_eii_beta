@@ -14,6 +14,7 @@
 #   - ind_44_stock: Stock market openness composite (%)
 #   - ind_31_fdi: Intra-GCC FDI as % of GDP
 #   - ind_bank_depth: Bank assets as % of GDP
+#   - ind_fiscal_balance: Fiscal balance as % of total revenues
 #
 # Data Sources:
 #   - CPI data (inflation)
@@ -21,6 +22,7 @@
 #   - National Accounts (GDP, growth)
 #   - Common Market (banking, stock market)
 #   - FDI flows
+#   - Fiscal data (revenues, surplus/deficit)
 #
 # =============================================================================
 
@@ -50,7 +52,8 @@ extract_financial_raw <- function(data_list, year_filter) {
   stock_market <- calc_stock_market_raw(data_list$common_market, year_filter)
   fdi <- calc_fdi_raw(data_list$fdi, data_list$national_accounts, year_filter)
   bank_depth <- calc_bank_depth_raw(data_list$monetary, data_list$national_accounts, year_filter)
-  
+  fiscal_balance <- calc_fiscal_balance_raw(data_list$fiscal, year_filter)
+
   # Combine all indicators
   financial_raw <- tibble(uName = gcc_countries) %>%
     left_join(inflation, by = "uName") %>%
@@ -59,7 +62,8 @@ extract_financial_raw <- function(data_list, year_filter) {
     left_join(banking, by = "uName") %>%
     left_join(stock_market, by = "uName") %>%
     left_join(fdi, by = "uName") %>%
-    left_join(bank_depth, by = "uName")
+    left_join(bank_depth, by = "uName") %>%
+    left_join(fiscal_balance, by = "uName")
   
   return(financial_raw)
 }
@@ -361,6 +365,46 @@ calc_bank_depth_raw <- function(monetary_data, na_data, year_filter) {
   return(bank_depth)
 }
 
+#' Fiscal Balance Ratio (Raw)
+#'
+#' Surplus (Deficit) / Total Revenues * 100.
+#' Positive = surplus, negative = deficit. Higher values indicate
+#' stronger fiscal position, supporting macroeconomic convergence.
+#'
+#' @param fiscal_data Fiscal dataset from load_fiscal_csv()
+#' @param year_filter Year to calculate
+#' @return Tibble with uName, ind_fiscal_balance
+calc_fiscal_balance_raw <- function(fiscal_data, year_filter) {
+
+  gcc_countries <- c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "UAE")
+
+  if (is.null(fiscal_data)) {
+    return(tibble(uName = gcc_countries, ind_fiscal_balance = NA_real_))
+  }
+
+  total_rev <- fiscal_data %>%
+    filter(item == "Total Revenues", year == year_filter) %>%
+    select(country, total_rev = value)
+
+  surplus <- fiscal_data %>%
+    filter(item == "Surplus ( Deficit )", year == year_filter) %>%
+    select(country, surplus = value)
+
+  result <- total_rev %>%
+    inner_join(surplus, by = "country") %>%
+    mutate(
+      ind_fiscal_balance = (surplus / total_rev) * 100
+    ) %>%
+    select(uName = country, ind_fiscal_balance)
+
+  # Ensure all countries present
+  all_countries <- tibble(uName = gcc_countries)
+  result <- all_countries %>%
+    left_join(result, by = "uName")
+
+  return(result)
+}
+
 # =============================================================================
 # MODULE LOAD MESSAGE
 # =============================================================================
@@ -381,6 +425,7 @@ Individual indicators:
   - ind_44_stock: Stock market openness (%)
   - ind_31_fdi: Intra-GCC FDI (% of GDP)
   - ind_bank_depth: Bank assets (% of GDP)
+  - ind_fiscal_balance: Fiscal balance ratio (% of revenues)
 
 =======================================================
 ")
