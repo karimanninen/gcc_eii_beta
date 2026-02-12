@@ -40,24 +40,43 @@
 # =============================================================================
 
 # --- Database Connection -----------------------------------------------------
+#
+# db_config <- list(
+#   host     = Sys.getenv("MARSA_HOST",     "warehouse.marsa.gccstat.org"),
+#   port     = as.integer(Sys.getenv("MARSA_PORT", "5434")),
+#   dbname   = Sys.getenv("MARSA_DB",       "prod-diss-warehouse"),
+#   user     = Sys.getenv("MARSA_USER",     "k.manninen"),
+#   password = Sys.getenv("MARSA_PASSWORD", "")
+# )
+#
+# # Common Market lives on the "final" warehouse instance (port 5433)
+# # Uses its own env vars so credentials can differ from the diss warehouse.
+# # Falls back to the diss warehouse values if not set.
+# db_config_final <- list(
+#   host     = Sys.getenv("MARSA_HOST_FINAL",     Sys.getenv("MARSA_HOST",     "warehouse.marsa.gccstat.org")),
+#   port     = as.integer(Sys.getenv("MARSA_PORT_FINAL", "5433")),
+#   dbname   = Sys.getenv("MARSA_DB_FINAL",       "prod-final-warehouse"),
+#   user     = Sys.getenv("MARSA_USER_FINAL",     Sys.getenv("MARSA_USER",     "k.manninen")),
+#   password = Sys.getenv("MARSA_PASSWORD_FINAL", Sys.getenv("MARSA_PASSWORD", ""))
+# )
+
+# --- Database Connection TEMP--------------------------------------------------
 
 db_config <- list(
   host     = Sys.getenv("MARSA_HOST",     "warehouse.marsa.gccstat.org"),
   port     = as.integer(Sys.getenv("MARSA_PORT", "5434")),
   dbname   = Sys.getenv("MARSA_DB",       "prod-diss-warehouse"),
-  user     = Sys.getenv("MARSA_USER",     "k.manninen"),
-  password = Sys.getenv("MARSA_PASSWORD", "")
+  user     = "prod-diss-user",
+  password = "auP4neo9Doox"
 )
 
 # Common Market lives on the "final" warehouse instance (port 5433)
-# Uses its own env vars so credentials can differ from the diss warehouse.
-# Falls back to the diss warehouse values if not set.
 db_config_final <- list(
-  host     = Sys.getenv("MARSA_HOST_FINAL",     Sys.getenv("MARSA_HOST",     "warehouse.marsa.gccstat.org")),
+  host     = Sys.getenv("MARSA_HOST",            "warehouse.marsa.gccstat.org"),
   port     = as.integer(Sys.getenv("MARSA_PORT_FINAL", "5433")),
-  dbname   = Sys.getenv("MARSA_DB_FINAL",       "prod-final-warehouse"),
-  user     = Sys.getenv("MARSA_USER_FINAL",     Sys.getenv("MARSA_USER",     "k.manninen")),
-  password = Sys.getenv("MARSA_PASSWORD_FINAL", Sys.getenv("MARSA_PASSWORD", ""))
+  dbname   = Sys.getenv("MARSA_DB_FINAL",        "prod-final-warehouse"),
+  user     = "prod-final-user",
+  password = "quae9raeg9Su"
 )
 
 # --- Extraction Settings -----------------------------------------------------
