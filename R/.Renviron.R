@@ -1,0 +1,2 @@
+MARSA_PASSWORD=EaMt!2029
+MARSA_USER=k.manninen
